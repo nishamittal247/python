@@ -116,10 +116,10 @@ Sub GenerateDashboard()
         If Not seen Then tickers.Add t(1)
     Next t
 
-    ' Dropdown in E1
-    wsDash.Range("E1").Value = "All"
-    wsDash.Range("E1").Validation.Delete
-    With wsDash.Range("E1").Validation
+    ' Dropdown in E20
+    wsDash.Range("E20").Value = "All"
+    wsDash.Range("E20").Validation.Delete
+    With wsDash.Range("E20").Validation
         .Add Type:=xlValidateList, _
              AlertStyle:=xlValidAlertStop, _
              Formula1:="All," & Join(tickersToArray(tickers), ",")
@@ -128,7 +128,7 @@ Sub GenerateDashboard()
     End With
 
     ' Output placeholder headers
-    wsDash.Range("A4:B4").Value = Array("Maturity", "Trades")
+    wsDash.Range("A20:B20").Value = Array("Maturity", "Trades")
 
     ' Draw initial chart
     Call UpdateMaturityChart
@@ -136,7 +136,8 @@ End Sub
 
 Sub UpdateMaturityChart()
     Dim wsDash As Worksheet: Set wsDash = ThisWorkbook.Sheets("Dashboard")
-    Dim selected As String: selected = wsDash.Range("E1").Value
+    if tradeSummary is Nothing Then Exit Sub
+    Dim selected As String: selected = wsDash.Range("E20").Value
     Dim maturityList As Collection: Set maturityList = New Collection
     Dim i As Long, j As Long
     Dim entry(1 To 2) As Variant
@@ -163,8 +164,8 @@ Sub UpdateMaturityChart()
     Next i
 
     ' Output to sheet
-    wsDash.Range("A5:B100").ClearContents
-    i = 5
+    wsDash.Range("A21:B100").ClearContents
+    i = 21
     For Each key In maturityList
         wsDash.Cells(i, 1).Value = key(0) ' Maturity
         wsDash.Cells(i, 2).Value = key(1) ' Count
@@ -182,7 +183,7 @@ Sub UpdateMaturityChart()
     End If
     With cObj.Chart
         .ChartType = xlColumnClustered
-        .SetSourceData Source:=wsDash.Range("A4:B" & i - 1)
+        .SetSourceData Source:=wsDash.Range("A20:B" & i - 1)
         .HasTitle = True
         .ChartTitle.Text = "Trades by Maturity (" & selected & ")"
     End With
