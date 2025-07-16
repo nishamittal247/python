@@ -21,17 +21,28 @@ Sub SetupDealerAnalysis()
     ' UI elements
     With ws
         .Range("B2").Value = "Dealer:"
-        .Range("B2").Font.Bold = True
-        .Range("B2").HorizontalAlignment = xlRight
+        With .Range("B2")
+            .Font.Bold = True
+            .Font.Size = 11
+            .Font.Name = "Segoe UI"
+            .HorizontalAlignment = xlRight
+        End With
 
         .Range("C2").ClearContents
-        .Range("C2").Interior.Color = RGB(255, 255, 255)
-        .Range("C2").Borders.LineStyle = xlContinuous
-        .Range("C2").ColumnWidth = 15
+        With .Range("C2")
+            .Interior.Color = RGB(255, 255, 255)
+            .Font.Name = "Segoe UI"
+            .Font.Size = 11
+            .BorderAround xlContinuous, xlThin, xlColorIndexAutomatic
+            .ColumnWidth = 15
+        End With
 
         .Range("D2").Value = "="
-        .Range("D2").Font.Bold = True
-        .Range("D2").HorizontalAlignment = xlCenter
+        With .Range("D2")
+            .Font.Bold = True
+            .Font.Color = RGB(120, 120, 120)
+            .HorizontalAlignment = xlCenter
+        End With
     End With
 
     ' Set initial chart mode
@@ -45,6 +56,7 @@ Sub SetupDealerAnalysis()
         .Name = "btnToggleDealer"
         .TextFrame.Characters.Text = "Show Trades"
         .OnAction = "ToggleDealerChart"
+        .TextFrame.Characters.Font.Size = 10
     End With
 
     ' Draw initial chart
@@ -101,6 +113,9 @@ SkipRow:
         i = i + 1
     Next key
 
+    ' Hide data columns
+    ws.Columns("Z:AA").EntireColumn.Hidden = True
+
     ' Draw or update chart
     Dim chartObj As ChartObject
     On Error Resume Next
@@ -116,5 +131,15 @@ SkipRow:
         .HasTitle = True
         .ChartTitle.Text = dealerMode & " per Broker" & _
             IIf(dealerFilter <> "", " (" & ws.Range("C2").Value & ")", "")
+        With .ChartTitle.Font
+            .Size = 12
+            .Name = "Segoe UI"
+            .Bold = True
+        End With
+        .Axes(xlCategory).TickLabels.Font.Size = 10
+        .Axes(xlValue).TickLabels.Font.Size = 10
+        .Axes(xlCategory).TickLabels.Font.Name = "Segoe UI"
+        .Axes(xlValue).TickLabels.Font.Name = "Segoe UI"
+        .PlotArea.Format.Fill.ForeColor.RGB = RGB(245, 245, 245)
     End With
 End Sub
