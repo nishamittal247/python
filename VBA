@@ -1,0 +1,160 @@
+Option Explicit
+
+Public tradeSummary As Object
+
+Sub GenerateDashboard()
+    Dim wsData As Worksheet, wsDash As Worksheet
+    Dim i As Long, lastRow As Long
+    Dim broker As String, ticker As String, maturity As String
+    Dim ask As Variant, bid As Variant, traded As Variant
+    Dim key As Variant
+
+    Set wsData = ThisWorkbook.Sheets("bot")
+
+    ' Create or clear Dashboard sheet
+    On Error Resume Next
+    Set wsDash = ThisWorkbook.Sheets("Dashboard")
+    If wsDash Is Nothing Then
+        Set wsDash = ThisWorkbook.Sheets.Add(After:=wsData)
+        wsDash.Name = "Dashboard"
+    Else
+        wsDash.Cells.Clear
+        For i = wsDash.Shapes.Count To 1 Step -1
+            wsDash.Shapes(i).Delete
+        Next i
+    End If
+    On Error GoTo 0
+
+    lastRow = wsData.Cells(wsData.Rows.Count, 2).End(xlUp).Row
+
+    ' Initialize dictionaries
+    Dim brokerDict As Object: Set brokerDict = CreateObject("Scripting.Dictionary")
+    Set tradeSummary = CreateObject("Scripting.Dictionary")
+
+    ' Loop through data
+    For i = 2 To lastRow
+        broker = Trim(wsData.Cells(i, 2).Value)
+        ticker = Trim(wsData.Cells(i, 4).Value)
+        maturity = Trim(wsData.Cells(i, 6).Text)
+        ask = wsData.Cells(i, 7).Value
+        bid = wsData.Cells(i, 8).Value
+        traded = wsData.Cells(i, 9).Value
+
+        ' Initialize broker entry if needed
+        If Not brokerDict.exists(broker) Then
+            brokerDict.Add broker, Array(0, 0) ' (quoteCount, tradeCount)
+        End If
+
+        ' Count quotes
+        If (Not IsEmpty(ask) Or Not IsEmpty(bid)) And IsEmpty(traded) Then
+            brokerDict(broker)(0) = brokerDict(broker)(0) + 1
+        End If
+
+        ' Count trades
+        If Not IsEmpty(traded) Then
+            brokerDict(broker)(1) = brokerDict(broker)(1) + 1
+            Dim entryKey As String
+            entryKey = ticker & "|" & maturity
+            If Not tradeSummary.exists(entryKey) Then
+                tradeSummary.Add entryKey, 1
+            Else
+                tradeSummary(entryKey) = tradeSummary(entryKey) + 1
+            End If
+        End If
+    Next i
+
+    ' Output quote/trade table
+    wsDash.Range("A1:C1").Value = Array("Broker", "Quotes", "Trades")
+    i = 2
+    For Each key In brokerDict.Keys
+        wsDash.Cells(i, 1).Value = key
+        wsDash.Cells(i, 2).Value = brokerDict(key)(0)
+        wsDash.Cells(i, 3).Value = brokerDict(key)(1)
+        i = i + 1
+    Next key
+
+    ' Chart: Quotes vs Trades
+    Dim chart1 As ChartObject
+    Set chart1 = wsDash.ChartObjects.Add(Left:=300, Top:=10, Width:=400, Height:=250)
+    With chart1.Chart
+        .ChartType = xlColumnStacked
+        .SetSourceData Source:=wsDash.Range("A1:C" & i - 1)
+        .HasTitle = True
+        .ChartTitle.Text = "Quotes vs Trades per Broker"
+        .HasLegend = True
+    End With
+
+    ' Extract unique tickers for dropdown
+    Dim tickers As Object: Set tickers = CreateObject("Scripting.Dictionary")
+    Dim t
+    For Each t In tradeSummary.Keys
+        ticker = Split(t, "|")(0)
+        If Not tickers.exists(ticker) Then tickers.Add ticker, 1
+    Next t
+
+    ' Dropdown in E1
+    wsDash.Range("E1").Value = "All"
+    wsDash.Range("E1").Validation.Delete
+    With wsDash.Range("E1").Validation
+        .Add Type:=xlValidateList, _
+             AlertStyle:=xlValidAlertStop, _
+             Formula1:="All," & Join(tickers.Keys, ",")
+        .IgnoreBlank = True
+        .InCellDropdown = True
+    End With
+
+    ' Output placeholder headers
+    wsDash.Range("A4:B4").Value = Array("Maturity", "Trades")
+
+    ' Initial draw of chart
+    Call UpdateMaturityChart
+End Sub
+
+Sub UpdateMaturityChart()
+    Dim wsDash As Worksheet: Set wsDash = ThisWorkbook.Sheets("Dashboard")
+    Dim selected As String: selected = wsDash.Range("E1").Value
+    Dim maturityDict As Object: Set maturityDict = CreateObject("Scripting.Dictionary")
+
+    Dim i As Long
+    Dim entryArr As Variant
+    Dim ticker As String, maturity As String
+    Dim key
+
+    For Each key In tradeSummary.Keys
+        entryArr = Split(key, "|")
+        ticker = entryArr(0)
+        maturity = entryArr(1)
+        If selected = "All" Or ticker = selected Then
+            If Not maturityDict.exists(maturity) Then
+                maturityDict.Add maturity, tradeSummary(key)
+            Else
+                maturityDict(maturity) = maturityDict(maturity) + tradeSummary(key)
+            End If
+        End If
+    Next key
+
+    ' Output to sheet
+    wsDash.Range("A5:B100").ClearContents
+    i = 5
+    For Each key In maturityDict.Keys
+        wsDash.Cells(i, 1).Value = key
+        wsDash.Cells(i, 2).Value = maturityDict(key)
+        i = i + 1
+    Next key
+
+    ' Draw chart
+    Dim cObj As ChartObject
+    On Error Resume Next
+    Set cObj = wsDash.ChartObjects("MaturityChart")
+    On Error GoTo 0
+    If cObj Is Nothing Then
+        Set cObj = wsDash.ChartObjects.Add(Left:=300, Top:=280, Width:=400, Height:=250)
+        cObj.Name = "MaturityChart"
+    End If
+    With cObj.Chart
+        .ChartType = xlColumnClustered
+        .SetSourceData Source:=wsDash.Range("A4:B" & i - 1)
+        .HasTitle = True
+        .ChartTitle.Text = "Trades by Maturity (" & selected & ")"
+    End With
+End Sub
