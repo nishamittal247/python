@@ -1,14 +1,14 @@
 Option Explicit
 
-Public dealerMode As String
+Public securityMode As String
 
-Sub SetupDealerAnalysis()
+Sub SetupSecurityAnalysis()
     Dim ws As Worksheet
     On Error Resume Next
-    Set ws = ThisWorkbook.Sheets("DealerAnalysis")
+    Set ws = ThisWorkbook.Sheets("SecurityAnalysis")
     If ws Is Nothing Then
         Set ws = ThisWorkbook.Sheets.Add(After:=Sheets(Sheets.Count))
-        ws.Name = "DealerAnalysis"
+        ws.Name = "SecurityAnalysis"
     Else
         ws.Cells.Clear
         Dim shp As Shape
@@ -17,6 +17,19 @@ Sub SetupDealerAnalysis()
         Next shp
     End If
     On Error GoTo 0
+
+    ' Dashboard title
+    With ws.Range("B1:G1")
+        .Merge
+        .Value = "📈 Security-Level Activity"
+        .Font.Size = 14
+        .Font.Bold = True
+        .Font.Name = "Segoe UI"
+        .Interior.Color = RGB(230, 230, 230)
+        .HorizontalAlignment = xlLeft
+        .VerticalAlignment = xlCenter
+        .RowHeight = 30
+    End With
 
     ' UI elements
     With ws
@@ -45,91 +58,90 @@ Sub SetupDealerAnalysis()
         End With
     End With
 
-    ' Set initial chart mode
-    dealerMode = "Quotes"
+    ' Set initial mode
+    securityMode = "Trades"
 
-    ' Create toggle button in E2
+    ' Toggle button
     Dim btn As Shape
     Set btn = ws.Shapes.AddFormControl(Type:=xlButtonControl, _
         Left:=ws.Range("E2").Left, Top:=ws.Range("E2").Top, Width:=90, Height:=20)
     With btn
-        .Name = "btnToggleDealer"
-        .TextFrame.Characters.Text = "Show Trades"
-        .OnAction = "ToggleDealerChart"
+        .Name = "btnToggleSecurity"
+        .TextFrame.Characters.Text = "Show Quotes"
+        .OnAction = "ToggleSecurityChart"
         .TextFrame.Characters.Font.Size = 10
     End With
 
     ' Draw initial chart
-    Call DrawDealerChart
+    Call DrawSecurityChart
 End Sub
 
-Sub ToggleDealerChart()
-    Dim ws As Worksheet: Set ws = ThisWorkbook.Sheets("DealerAnalysis")
-    dealerMode = IIf(dealerMode = "Quotes", "Trades", "Quotes")
-    ws.Shapes("btnToggleDealer").TextFrame.Characters.Text = _
-        IIf(dealerMode = "Quotes", "Show Trades", "Show Quotes")
-    Call DrawDealerChart
+Sub ToggleSecurityChart()
+    Dim ws As Worksheet: Set ws = ThisWorkbook.Sheets("SecurityAnalysis")
+    securityMode = IIf(securityMode = "Trades", "Quotes", "Trades")
+    ws.Shapes("btnToggleSecurity").TextFrame.Characters.Text = _
+        IIf(securityMode = "Trades", "Show Quotes", "Show Trades")
+    Call DrawSecurityChart
 End Sub
 
-Sub DrawDealerChart()
+Sub DrawSecurityChart()
     Dim wsData As Worksheet: Set wsData = ThisWorkbook.Sheets("bot")
-    Dim ws As Worksheet: Set ws = ThisWorkbook.Sheets("DealerAnalysis")
+    Dim ws As Worksheet: Set ws = ThisWorkbook.Sheets("SecurityAnalysis")
     Dim dealerFilter As String: dealerFilter = LCase(Trim(ws.Range("C2").Value))
 
     Dim lastRow As Long: lastRow = wsData.Cells(wsData.Rows.Count, 2).End(xlUp).Row
-    Dim brokerDict As Object: Set brokerDict = CreateObject("Scripting.Dictionary")
+    Dim secDict As Object: Set secDict = CreateObject("Scripting.Dictionary")
 
     Dim i As Long
-    Dim broker As String, traded, ask, bid
+    Dim broker As String, traded, ask, bid, ticker
 
     For i = 2 To lastRow
         broker = Trim(wsData.Cells(i, 2).Value)
+        ticker = Trim(wsData.Cells(i, 4).Value)
         If dealerFilter <> "" And LCase(broker) <> dealerFilter Then GoTo SkipRow
 
         traded = wsData.Cells(i, 9).Value
         ask = wsData.Cells(i, 7).Value
         bid = wsData.Cells(i, 8).Value
 
-        If Not brokerDict.exists(broker) Then brokerDict(broker) = 0
+        If Not secDict.exists(ticker) Then secDict(ticker) = 0
 
-        If dealerMode = "Trades" Then
-            If Not IsEmpty(traded) Then brokerDict(broker) = brokerDict(broker) + 1
+        If securityMode = "Trades" Then
+            If Not IsEmpty(traded) Then secDict(ticker) = secDict(ticker) + 1
         Else
             If (Not IsEmpty(ask) Or Not IsEmpty(bid)) And IsEmpty(traded) Then
-                brokerDict(broker) = brokerDict(broker) + 1
+                secDict(ticker) = secDict(ticker) + 1
             End If
         End If
 SkipRow:
     Next i
 
-    ' Output to Z:AA (hidden range)
+    ' Output to Z:AA (hidden)
     ws.Range("Z1:AA100").ClearContents
-    ws.Range("Z1:AA1").Value = Array("Broker", dealerMode)
+    ws.Range("Z1:AA1").Value = Array("Security", securityMode)
     i = 2
     Dim key
-    For Each key In brokerDict.Keys
-        ws.Cells(i, 26).Value = key         ' Z
-        ws.Cells(i, 27).Value = brokerDict(key) ' AA
+    For Each key In secDict.Keys
+        ws.Cells(i, 26).Value = key
+        ws.Cells(i, 27).Value = secDict(key)
         i = i + 1
     Next key
-
-    ' Hide data columns
     ws.Columns("Z:AA").EntireColumn.Hidden = True
 
     ' Draw or update chart
     Dim chartObj As ChartObject
     On Error Resume Next
-    Set chartObj = ws.ChartObjects("DealerChart")
+    Set chartObj = ws.ChartObjects("SecurityChart")
     On Error GoTo 0
     If chartObj Is Nothing Then
         Set chartObj = ws.ChartObjects.Add(Left:=100, Top:=80, Width:=500, Height:=300)
-        chartObj.Name = "DealerChart"
+        chartObj.Name = "SecurityChart"
     End If
     With chartObj.Chart
         .ChartType = xlColumnClustered
         .SetSourceData Source:=ws.Range("Z1:AA" & i - 1)
         .HasTitle = True
-        .ChartTitle.Text = dealerMode & " per Broker" & _
+        .ChartTitle.Text = securityMode & " by Security" & _
             IIf(dealerFilter <> "", " (" & ws.Range("C2").Value & ")", "")
         With .ChartTitle.Font
             .Size = 12
@@ -141,5 +153,7 @@ SkipRow:
         .Axes(xlCategory).TickLabels.Font.Name = "Segoe UI"
         .Axes(xlValue).TickLabels.Font.Name = "Segoe UI"
         .PlotArea.Format.Fill.ForeColor.RGB = RGB(245, 245, 245)
+        chartObj.Format.Fill.ForeColor.RGB = RGB(250, 250, 250)
+        chartObj.Format.Line.Visible = msoFalse
     End With
 End Sub
