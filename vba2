@@ -1,4 +1,3 @@
-' New module to create Dealer-level analysis on a new worksheet
 Option Explicit
 
 Public dealerMode As String
@@ -19,31 +18,36 @@ Sub SetupDealerAnalysis()
     End If
     On Error GoTo 0
 
-    ' UI: Dealer label + input
+    ' UI elements
     With ws
         .Range("B2").Value = "Dealer:"
         .Range("B2").Font.Bold = True
         .Range("B2").HorizontalAlignment = xlRight
+
         .Range("C2").ClearContents
         .Range("C2").Interior.Color = RGB(255, 255, 255)
         .Range("C2").Borders.LineStyle = xlContinuous
+        .Range("C2").ColumnWidth = 15
+
         .Range("D2").Value = "="
         .Range("D2").Font.Bold = True
         .Range("D2").HorizontalAlignment = xlCenter
     End With
 
-    ' Create toggle button
+    ' Set initial chart mode
     dealerMode = "Quotes"
+
+    ' Create toggle button in E2
     Dim btn As Shape
     Set btn = ws.Shapes.AddFormControl(Type:=xlButtonControl, _
-        Left:=ws.Range("E2").Left, Top:=ws.Range("E2").Top, Width:=100, Height:=20)
+        Left:=ws.Range("E2").Left, Top:=ws.Range("E2").Top, Width:=90, Height:=20)
     With btn
         .Name = "btnToggleDealer"
         .TextFrame.Characters.Text = "Show Trades"
         .OnAction = "ToggleDealerChart"
     End With
 
-    ' Draw chart
+    ' Draw initial chart
     Call DrawDealerChart
 End Sub
 
@@ -68,7 +72,7 @@ Sub DrawDealerChart()
 
     For i = 2 To lastRow
         broker = Trim(wsData.Cells(i, 2).Value)
-        If dealerFilter <> "" And LCase(broker) <> dealerFilter Then GoTo ContinueLoop
+        If dealerFilter <> "" And LCase(broker) <> dealerFilter Then GoTo SkipRow
 
         traded = wsData.Cells(i, 9).Value
         ask = wsData.Cells(i, 7).Value
@@ -83,17 +87,17 @@ Sub DrawDealerChart()
                 brokerDict(broker) = brokerDict(broker) + 1
             End If
         End If
-ContinueLoop:
+SkipRow:
     Next i
 
-    ' Output to hidden range
+    ' Output to Z:AA (hidden range)
     ws.Range("Z1:AA100").ClearContents
     ws.Range("Z1:AA1").Value = Array("Broker", dealerMode)
     i = 2
     Dim key
     For Each key In brokerDict.Keys
-        ws.Cells(i, 26).Value = key
-        ws.Cells(i, 27).Value = brokerDict(key)
+        ws.Cells(i, 26).Value = key         ' Z
+        ws.Cells(i, 27).Value = brokerDict(key) ' AA
         i = i + 1
     Next key
 
