@@ -1,7 +1,6 @@
-
 Option Explicit
 
-Dim tradeSummary As Collection
+Public tradeSummary As Collection
 
 Sub GenerateDashboard()
     Dim wsData As Worksheet, wsDash As Worksheet
@@ -105,29 +104,38 @@ Sub GenerateDashboard()
         .ChartTitle.Text = "Quotes vs Trades per Broker"
     End With
 
-    ' Extract unique tickers for dropdown
-    Dim tickers As Collection: Set tickers = New Collection
-    Dim t As Variant, seen As Boolean
-    For Each t In tradeSummary
-        seen = False
-        For Each key In tickers
-            If key = t(1) Then seen = True: Exit For
-        Next key
-        If Not seen Then tickers.Add t(1)
-    Next t
+    ' Add filter UI
+    wsDash.Range("D2").Value = "Ticker:"
+    wsDash.Range("D2").Font.Bold = True
+    wsDash.Range("D2").HorizontalAlignment = xlRight
+    wsDash.Range("E2").ClearContents
+    wsDash.Range("E2").Interior.Color = RGB(255, 255, 255)
+    wsDash.Range("E2").Borders.LineStyle = xlContinuous
+    wsDash.Range("F2").Value = "="
+    wsDash.Range("F2").Interior.Color = RGB(240, 240, 240)
+    wsDash.Range("F2").Font.Bold = True
+    wsDash.Range("F2").HorizontalAlignment = xlCenter
 
-    ' Dropdown in E20
-    wsDash.Range("E20").Value = "All"
-    wsDash.Range("E20").Validation.Delete
-    With wsDash.Range("E20").Validation
-        .Add Type:=xlValidateList, _
-             AlertStyle:=xlValidAlertStop, _
-             Formula1:="All," & Join(tickersToArray(tickers), ",")
-        .IgnoreBlank = True
-        .InCellDropdown = True
+    ' Remove previous filter button if exists
+    For Each key In wsDash.Shapes
+        If key.Type = msoFormControl Then
+            If key.FormControlType = xlButtonControl Then
+                If key.Name = "btnFilter" Then key.Delete
+            End If
+        End If
+    Next key
+
+    ' Create Filter button
+    Dim btn As Shape
+    Set btn = wsDash.Shapes.AddFormControl(Type:=xlButtonControl, _
+        Left:=wsDash.Range("G2").Left, Top:=wsDash.Range("G2").Top, Width:=70, Height:=20)
+    With btn
+        .Name = "btnFilter"
+        .TextFrame.Characters.Text = "Filter"
+        .OnAction = "UpdateMaturityChart"
     End With
 
-    ' Output placeholder headers
+    ' Output placeholder headers for maturity data
     wsDash.Range("A20:B20").Value = Array("Maturity", "Trades")
 
     ' Draw initial chart
@@ -136,8 +144,8 @@ End Sub
 
 Sub UpdateMaturityChart()
     Dim wsDash As Worksheet: Set wsDash = ThisWorkbook.Sheets("Dashboard")
-    if tradeSummary is Nothing Then Exit Sub
-    Dim selected As String: selected = wsDash.Range("E20").Value
+    If tradeSummary Is Nothing Then Exit Sub
+    Dim selected As String: selected = Trim(wsDash.Range("E2").Value)
     Dim maturityList As Collection: Set maturityList = New Collection
     Dim i As Long, j As Long
     Dim entry(1 To 2) As Variant
@@ -146,7 +154,7 @@ Sub UpdateMaturityChart()
 
     ' Build aggregated (maturity, count) data
     For i = 1 To tradeSummary.Count
-        If selected = "All" Or tradeSummary(i)(1) = selected Then
+        If selected = "" Or LCase(selected) = "all" Or LCase(Trim(tradeSummary(i)(1))) = LCase(selected) Then
             found = False
             For j = 1 To maturityList.Count
                 If maturityList(j)(1) = tradeSummary(i)(2) Then
@@ -185,7 +193,7 @@ Sub UpdateMaturityChart()
         .ChartType = xlColumnClustered
         .SetSourceData Source:=wsDash.Range("A20:B" & i - 1)
         .HasTitle = True
-        .ChartTitle.Text = "Trades by Maturity (" & selected & ")"
+        .ChartTitle.Text = "Trades by Maturity (" & IIf(selected = "", "All", selected) & ")"
     End With
 End Sub
 
@@ -198,9 +206,3 @@ Function tickersToArray(col As Collection) As Variant
     Next i
     tickersToArray = arr
 End Function
-
-
-
-
-
-
