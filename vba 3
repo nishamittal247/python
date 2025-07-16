@@ -1,7 +1,7 @@
 Option Explicit
 
-Dim tradeSummary As Collection
-Dim dealerMode As String
+Public dealerMode As String
+Public tradeSummary As Collection
 
 Sub GenerateDashboard()
     Dim wsData As Worksheet, wsDash As Worksheet
@@ -10,9 +10,10 @@ Sub GenerateDashboard()
     Dim ask, bid, traded, key
     Dim bIndex As Long
 
+    Set tradeSummary = New Collection
     Set wsData = ThisWorkbook.Sheets("bot")
 
-    ' Create or clear Dashboard sheet
+    ' Create or clear Dashboard
     On Error Resume Next
     Set wsDash = ThisWorkbook.Sheets("Dashboard")
     If wsDash Is Nothing Then
@@ -20,15 +21,66 @@ Sub GenerateDashboard()
         wsDash.Name = "Dashboard"
     Else
         wsDash.Cells.Clear
-        For Each key In wsDash.Shapes
-            key.Delete
-        Next key
+        Dim shp As Shape
+        For Each shp In wsDash.Shapes
+            shp.Delete
+        Next shp
     End If
     On Error GoTo 0
 
     lastRow = wsData.Cells(wsData.Rows.Count, 2).End(xlUp).Row
 
-    ' Setup Title
+    ' Initialize broker lists
+    Dim brokerList() As String
+    Dim quoteCount() As Long
+    Dim tradeCount() As Long
+    Dim brokerCount As Long: brokerCount = 0
+
+    ' Collect data
+    For i = 2 To lastRow
+        broker = Trim(wsData.Cells(i, 2).Value)
+        ticker = Trim(wsData.Cells(i, 4).Value)
+        maturity = Trim(wsData.Cells(i, 6).Text)
+        ask = wsData.Cells(i, 7).Value
+        bid = wsData.Cells(i, 8).Value
+        traded = wsData.Cells(i, 9).Value
+
+        bIndex = 0
+        For key = 1 To brokerCount
+            If brokerList(key) = broker Then bIndex = key: Exit For
+        Next key
+        If bIndex = 0 Then
+            brokerCount = brokerCount + 1
+            ReDim Preserve brokerList(1 To brokerCount)
+            ReDim Preserve quoteCount(1 To brokerCount)
+            ReDim Preserve tradeCount(1 To brokerCount)
+            brokerList(brokerCount) = broker
+            quoteCount(brokerCount) = 0
+            tradeCount(brokerCount) = 0
+            bIndex = brokerCount
+        End If
+
+        If (Not IsEmpty(ask) Or Not IsEmpty(bid)) And IsEmpty(traded) Then
+            quoteCount(bIndex) = quoteCount(bIndex) + 1
+        End If
+
+        If Not IsEmpty(traded) Then
+            tradeCount(bIndex) = tradeCount(bIndex) + 1
+            Dim entry(1 To 3) As String
+            entry(1) = ticker: entry(2) = maturity: entry(3) = "1"
+            Dim exists As Boolean: exists = False
+            Dim j As Long
+            For j = 1 To tradeSummary.Count
+                If tradeSummary(j)(1) = ticker And tradeSummary(j)(2) = maturity Then
+                    tradeSummary(j)(3) = CStr(CLng(tradeSummary(j)(3)) + 1)
+                    exists = True: Exit For
+                End If
+            Next j
+            If Not exists Then tradeSummary.Add entry
+        End If
+    Next i
+
+    ' Dealer section title
     With wsDash.Range("B1:G1")
         .Merge
         .Value = "Dealer Activity Overview"
@@ -42,29 +94,31 @@ Sub GenerateDashboard()
         .RowHeight = 30
     End With
 
-    ' Labels + Input
-    wsDash.Range("B3").Value = "Dealer:"
-    With wsDash.Range("B3")
+    wsDash.Rows("2:3").RowHeight = 6
+
+    ' Filters for Dealer
+    wsDash.Range("B4").Value = "Dealer:"
+    With wsDash.Range("B4")
         .Font.Bold = True
         .Font.Size = 11
         .Font.Name = "Segoe UI"
         .HorizontalAlignment = xlRight
     End With
-
-    wsDash.Range("C3").ClearContents
-    With wsDash.Range("C3")
+    With wsDash.Range("C4")
         .Interior.Color = RGB(255, 255, 255)
         .Font.Name = "Segoe UI"
         .Font.Size = 11
         .BorderAround xlContinuous, xlThin, xlColorIndexAutomatic
         .ColumnWidth = 15
     End With
+    wsDash.Range("D4").Value = "="
+    wsDash.Range("D4").Font.Bold = True
 
-    ' Dealer Toggle Button
+    ' Toggle button (left side)
     dealerMode = "Trades"
     Dim btn As Shape
     Set btn = wsDash.Shapes.AddFormControl(Type:=xlButtonControl, _
-        Left:=wsDash.Range("E3").Left, Top:=wsDash.Range("E3").Top, Width:=90, Height:=20)
+        Left:=wsDash.Range("E4").Left, Top:=wsDash.Range("E4").Top, Width:=90, Height:=20)
     With btn
         .Name = "btnToggleDealer"
         .TextFrame.Characters.Text = "Show Quotes"
@@ -72,100 +126,61 @@ Sub GenerateDashboard()
         .TextFrame.Characters.Font.Size = 10
     End With
 
-    ' Load Dealer Chart
-    Call DrawDealerChart(wsData, wsDash)
+    ' Right Side: Ticker dropdown
+    Dim tickers As Collection: Set tickers = New Collection
+    Dim t As Variant, seen As Boolean
+    For Each t In tradeSummary
+        seen = False
+        For Each key In tickers
+            If key = t(1) Then seen = True: Exit For
+        Next key
+        If Not seen Then tickers.Add t(1)
+    Next t
 
-    ' Separator Line
-    With wsDash.Columns("K")
-        .ColumnWidth = 2
-        .Interior.Color = RGB(0, 0, 0)
-    End With
-
-    ' RIGHT SIDE SETUP — Security dropdown
-    Set tradeSummary = New Collection
-    Dim brokerList As Collection: Set brokerList = New Collection
-    Dim quoteCount As Object: Set quoteCount = CreateObject("Scripting.Dictionary")
-    Dim tradeCount As Object: Set tradeCount = CreateObject("Scripting.Dictionary")
-
-    ' Build TradeSummary
-    For i = 2 To lastRow
-        broker = Trim(wsData.Cells(i, 2).Value)
-        ticker = Trim(wsData.Cells(i, 4).Value)
-        maturity = Trim(wsData.Cells(i, 6).Text)
-        ask = wsData.Cells(i, 7).Value
-        bid = wsData.Cells(i, 8).Value
-        traded = wsData.Cells(i, 9).Value
-
-        If Not brokerList.Contains(broker) Then brokerList.Add broker
-
-        If (Not IsEmpty(ask) Or Not IsEmpty(bid)) And IsEmpty(traded) Then
-            quoteCount(broker) = quoteCount(broker) + 1
-        End If
-
-        If Not IsEmpty(traded) Then
-            tradeCount(broker) = tradeCount(broker) + 1
-
-            Dim entry(1 To 3) As String
-            entry(1) = ticker
-            entry(2) = maturity
-            entry(3) = "1"
-
-            Dim exists As Boolean: exists = False
-            Dim j As Long
-            For j = 1 To tradeSummary.Count
-                If tradeSummary(j)(1) = ticker And tradeSummary(j)(2) = maturity Then
-                    tradeSummary(j)(3) = CStr(CLng(tradeSummary(j)(3)) + 1)
-                    exists = True
-                    Exit For
-                End If
-            Next j
-            If Not exists Then tradeSummary.Add entry
-        End If
-    Next i
-
-    ' Dropdown
-    wsDash.Range("M3").Value = "Select Security"
-    With wsDash.Range("M3")
-        .Font.Bold = True
-        .Font.Size = 10
-        .Font.Name = "Segoe UI"
-    End With
-    wsDash.Range("N3").Value = "All"
-    wsDash.Range("N3").Validation.Delete
-    With wsDash.Range("N3").Validation
+    wsDash.Range("N2").Value = "All"
+    wsDash.Range("N2").Validation.Delete
+    With wsDash.Range("N2").Validation
         .Add Type:=xlValidateList, AlertStyle:=xlValidAlertStop, _
-             Formula1:="All," & Join(tickersToArray(tradeSummary), ",")
+            Formula1:="All," & Join(tickersToArray(tickers), ",")
         .IgnoreBlank = True
         .InCellDropdown = True
     End With
 
-    ' Chart Headers
-    wsDash.Range("M6:N6").Value = Array("Maturity", "Trades")
+    wsDash.Range("N1").Value = "Select Security"
+    With wsDash.Range("N1")
+        .Font.Bold = True
+        .Font.Size = 10
+        .Font.Name = "Segoe UI"
+    End With
 
-    ' Draw Chart
+    wsDash.Range("N5:O5").Value = Array("Maturity", "Trades")
+
+    Call DrawDealerChart
     Call UpdateMaturityChart
 End Sub
 
 Sub ToggleDealerChart()
-    Dim wsDash As Worksheet: Set wsDash = ThisWorkbook.Sheets("Dashboard")
     dealerMode = IIf(dealerMode = "Trades", "Quotes", "Trades")
-    wsDash.Shapes("btnToggleDealer").TextFrame.Characters.Text = _
-        IIf(dealerMode = "Trades", "Show Quotes", "Show Trades")
-    Call DrawDealerChart(ThisWorkbook.Sheets("bot"), wsDash)
+    With ThisWorkbook.Sheets("Dashboard").Shapes("btnToggleDealer")
+        .TextFrame.Characters.Text = IIf(dealerMode = "Trades", "Show Quotes", "Show Trades")
+    End With
+    Call DrawDealerChart
 End Sub
 
-Sub DrawDealerChart(wsData As Worksheet, ws As Worksheet)
-    Dim dealerFilter As String: dealerFilter = LCase(Trim(ws.Range("C3").Value))
+Sub DrawDealerChart()
+    Dim wsData As Worksheet: Set wsData = ThisWorkbook.Sheets("bot")
+    Dim ws As Worksheet: Set ws = ThisWorkbook.Sheets("Dashboard")
+    Dim dealerFilter As String: dealerFilter = LCase(Trim(ws.Range("C4").Value))
     Dim lastRow As Long: lastRow = wsData.Cells(wsData.Rows.Count, 2).End(xlUp).Row
     Dim dealerDict As Object: Set dealerDict = CreateObject("Scripting.Dictionary")
-    Dim i As Long, broker As String, traded, ask, bid
 
+    Dim i As Long
     For i = 2 To lastRow
-        broker = Trim(wsData.Cells(i, 2).Value)
+        Dim broker As String: broker = Trim(wsData.Cells(i, 2).Value)
         If dealerFilter <> "" And LCase(broker) <> dealerFilter Then GoTo SkipRow
-        traded = wsData.Cells(i, 9).Value
-        ask = wsData.Cells(i, 7).Value
-        bid = wsData.Cells(i, 8).Value
+        Dim traded: traded = wsData.Cells(i, 9).Value
+        Dim ask: ask = wsData.Cells(i, 7).Value
+        Dim bid: bid = wsData.Cells(i, 8).Value
 
         If Not dealerDict.exists(broker) Then dealerDict(broker) = 0
         If dealerMode = "Trades" Then
@@ -178,45 +193,53 @@ Sub DrawDealerChart(wsData As Worksheet, ws As Worksheet)
 SkipRow:
     Next i
 
-    ' Output to table
-    ws.Range("A6:B100").ClearContents
-    ws.Range("A6:B6").Value = Array("Dealer", dealerMode)
+    ws.Range("K6:L100").ClearContents
+    ws.Range("K6:L6").Value = Array("Dealer", dealerMode)
     i = 7
     Dim key
     For Each key In dealerDict.Keys
-        ws.Cells(i, 1).Value = key
-        ws.Cells(i, 2).Value = dealerDict(key)
+        ws.Cells(i, 11).Value = key
+        ws.Cells(i, 12).Value = dealerDict(key)
         i = i + 1
     Next key
 
-    ' Dealer Chart
+    With ws.Range("K6:L" & i - 1)
+        .Font.Name = "Segoe UI"
+        .Font.Size = 10
+        .Interior.Color = RGB(248, 248, 248)
+        .Borders.LineStyle = xlContinuous
+        .Borders.Weight = xlThin
+        .HorizontalAlignment = xlCenter
+        .Columns.AutoFit
+    End With
+
     Dim chartObj As ChartObject
     On Error Resume Next
     Set chartObj = ws.ChartObjects("DealerChart")
     On Error GoTo 0
     If chartObj Is Nothing Then
-        Set chartObj = ws.ChartObjects.Add(Left:=50, Top:=80, Width:=400, Height:=250)
+        Set chartObj = ws.ChartObjects.Add(Left:=100, Top:=100, Width:=400, Height:=280)
         chartObj.Name = "DealerChart"
     End If
     With chartObj.Chart
         .ChartType = xlColumnClustered
-        .SetSourceData Source:=ws.Range("A6:B" & i - 1)
+        .SetSourceData Source:=ws.Range("K6:L" & i - 1)
         .HasTitle = True
-        .ChartTitle.Text = dealerMode & " per Dealer" & _
-            IIf(dealerFilter <> "", " (" & ws.Range("C3").Value & ")", "")
-        .Axes(xlCategory).TickLabels.Font.Size = 9
-        .Axes(xlValue).TickLabels.Font.Size = 9
+        .ChartTitle.Text = dealerMode & " per Dealer"
     End With
 End Sub
 
 Sub UpdateMaturityChart()
     Dim ws As Worksheet: Set ws = ThisWorkbook.Sheets("Dashboard")
-    Dim selected As String: selected = ws.Range("N3").Value
+    If tradeSummary Is Nothing Then Exit Sub
+    If tradeSummary.Count = 0 Then Exit Sub
+
+    Dim selected As String: selected = ws.Range("N2").Value
     Dim maturityList As Collection: Set maturityList = New Collection
     Dim i As Long, j As Long
     Dim entry(1 To 2) As Variant
     Dim found As Boolean
-    Dim key As Variant
+    Dim key
 
     For i = 1 To tradeSummary.Count
         If selected = "All" Or tradeSummary(i)(1) = selected Then
@@ -228,16 +251,18 @@ Sub UpdateMaturityChart()
                 End If
             Next j
             If Not found Then
-                maturityList.Add Array(tradeSummary(i)(2), CLng(tradeSummary(i)(3)))
+                entry(1) = tradeSummary(i)(2)
+                entry(2) = CLng(tradeSummary(i)(3))
+                maturityList.Add Array(entry(1), entry(2))
             End If
         End If
     Next i
 
-    ws.Range("M7:N100").ClearContents
-    i = 7
+    ws.Range("N6:O100").ClearContents
+    i = 6
     For Each key In maturityList
-        ws.Cells(i, 13).Value = key(0) ' M
-        ws.Cells(i, 14).Value = key(1) ' N
+        ws.Cells(i, 14).Value = key(0)
+        ws.Cells(i, 15).Value = key(1)
         i = i + 1
     Next key
 
@@ -246,23 +271,35 @@ Sub UpdateMaturityChart()
     Set cObj = ws.ChartObjects("MaturityChart")
     On Error GoTo 0
     If cObj Is Nothing Then
-        Set cObj = ws.ChartObjects.Add(Left:=550, Top:=80, Width:=400, Height:=250)
+        Set cObj = ws.ChartObjects.Add(Left:=550, Top:=100, Width:=400, Height:=280)
         cObj.Name = "MaturityChart"
     End If
     With cObj.Chart
         .ChartType = xlColumnClustered
-        .SetSourceData Source:=ws.Range("M6:N" & i - 1)
+        .SetSourceData Source:=ws.Range("N5:O" & i - 1)
         .HasTitle = True
         .ChartTitle.Text = "Trades by Maturity (" & selected & ")"
     End With
 End Sub
 
 Function tickersToArray(col As Collection) As Variant
-    Dim arr() As String
-    Dim i As Long
+    Dim arr() As String, i As Long
     ReDim arr(0 To col.Count - 1)
     For i = 1 To col.Count
-        arr(i - 1) = col(i)(1)
+        arr(i - 1) = col(i)
     Next i
     tickersToArray = arr
 End Function
+
+
+Private Sub Worksheet_Change(ByVal Target As Range)
+    On Error GoTo ExitSub
+    If tradeSummary Is Nothing Then Exit Sub
+    If tradeSummary.Count = 0 Then Exit Sub
+    If Not Intersect(Target, Me.Range("N2")) Is Nothing Then
+        Application.EnableEvents = False
+        Call UpdateMaturityChart
+    End If
+ExitSub:
+    Application.EnableEvents = True
+End Sub
