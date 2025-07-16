@@ -1,13 +1,14 @@
+
 Option Explicit
 
-Public tradeSummary As Object
+Dim tradeSummary As Collection
 
 Sub GenerateDashboard()
     Dim wsData As Worksheet, wsDash As Worksheet
     Dim i As Long, lastRow As Long
     Dim broker As String, ticker As String, maturity As String
-    Dim ask As Variant, bid As Variant, traded As Variant
-    Dim key As Variant
+    Dim ask, bid, traded, key
+    Dim bIndex As Long
 
     Set wsData = ThisWorkbook.Sheets("bot")
 
@@ -19,17 +20,20 @@ Sub GenerateDashboard()
         wsDash.Name = "Dashboard"
     Else
         wsDash.Cells.Clear
-        For i = wsDash.Shapes.Count To 1 Step -1
-            wsDash.Shapes(i).Delete
-        Next i
+        For Each key In wsDash.Shapes
+            key.Delete
+        Next key
     End If
     On Error GoTo 0
 
     lastRow = wsData.Cells(wsData.Rows.Count, 2).End(xlUp).Row
 
-    ' Initialize dictionaries
-    Dim brokerDict As Object: Set brokerDict = CreateObject("Scripting.Dictionary")
-    Set tradeSummary = CreateObject("Scripting.Dictionary")
+    ' Initialize arrays
+    Dim brokerList() As String
+    Dim quoteCount() As Long
+    Dim tradeCount() As Long
+    Dim brokerCount As Long: brokerCount = 0
+    Set tradeSummary = New Collection
 
     ' Loop through data
     For i = 2 To lastRow
@@ -40,56 +44,76 @@ Sub GenerateDashboard()
         bid = wsData.Cells(i, 8).Value
         traded = wsData.Cells(i, 9).Value
 
-        ' Initialize broker entry if needed
-        If Not brokerDict.exists(broker) Then
-            brokerDict.Add broker, Array(0, 0) ' (quoteCount, tradeCount)
+        ' Add broker if not found
+        bIndex = 0
+        For key = 1 To brokerCount
+            If brokerList(key) = broker Then bIndex = key: Exit For
+        Next key
+        If bIndex = 0 Then
+            brokerCount = brokerCount + 1
+            ReDim Preserve brokerList(1 To brokerCount)
+            ReDim Preserve quoteCount(1 To brokerCount)
+            ReDim Preserve tradeCount(1 To brokerCount)
+            brokerList(brokerCount) = broker
+            quoteCount(brokerCount) = 0
+            tradeCount(brokerCount) = 0
+            bIndex = brokerCount
         End If
 
-        ' Count quotes
+        ' Count quotes (not traded, but bid/ask present)
         If (Not IsEmpty(ask) Or Not IsEmpty(bid)) And IsEmpty(traded) Then
-            brokerDict(broker)(0) = brokerDict(broker)(0) + 1
+            quoteCount(bIndex) = quoteCount(bIndex) + 1
         End If
 
         ' Count trades
         If Not IsEmpty(traded) Then
-            brokerDict(broker)(1) = brokerDict(broker)(1) + 1
-            Dim entryKey As String
-            entryKey = ticker & "|" & maturity
-            If Not tradeSummary.exists(entryKey) Then
-                tradeSummary.Add entryKey, 1
-            Else
-                tradeSummary(entryKey) = tradeSummary(entryKey) + 1
-            End If
+            tradeCount(bIndex) = tradeCount(bIndex) + 1
+
+            Dim entry(1 To 3) As String
+            entry(1) = ticker
+            entry(2) = maturity
+            entry(3) = "1"
+
+            Dim exists As Boolean: exists = False
+            Dim j As Long
+            For j = 1 To tradeSummary.Count
+                If tradeSummary(j)(1) = ticker And tradeSummary(j)(2) = maturity Then
+                    tradeSummary(j)(3) = CStr(CLng(tradeSummary(j)(3)) + 1)
+                    exists = True
+                    Exit For
+                End If
+            Next j
+            If Not exists Then tradeSummary.Add entry
         End If
     Next i
 
     ' Output quote/trade table
     wsDash.Range("A1:C1").Value = Array("Broker", "Quotes", "Trades")
-    i = 2
-    For Each key In brokerDict.Keys
-        wsDash.Cells(i, 1).Value = key
-        wsDash.Cells(i, 2).Value = brokerDict(key)(0)
-        wsDash.Cells(i, 3).Value = brokerDict(key)(1)
-        i = i + 1
-    Next key
+    For i = 1 To brokerCount
+        wsDash.Cells(i + 1, 1).Value = brokerList(i)
+        wsDash.Cells(i + 1, 2).Value = quoteCount(i)
+        wsDash.Cells(i + 1, 3).Value = tradeCount(i)
+    Next i
 
     ' Chart: Quotes vs Trades
     Dim chart1 As ChartObject
     Set chart1 = wsDash.ChartObjects.Add(Left:=300, Top:=10, Width:=400, Height:=250)
     With chart1.Chart
         .ChartType = xlColumnStacked
-        .SetSourceData Source:=wsDash.Range("A1:C" & i - 1)
+        .SetSourceData Source:=wsDash.Range("A1:C" & brokerCount + 1)
         .HasTitle = True
         .ChartTitle.Text = "Quotes vs Trades per Broker"
-        .HasLegend = True
     End With
 
     ' Extract unique tickers for dropdown
-    Dim tickers As Object: Set tickers = CreateObject("Scripting.Dictionary")
-    Dim t
-    For Each t In tradeSummary.Keys
-        ticker = Split(t, "|")(0)
-        If Not tickers.exists(ticker) Then tickers.Add ticker, 1
+    Dim tickers As Collection: Set tickers = New Collection
+    Dim t As Variant, seen As Boolean
+    For Each t In tradeSummary
+        seen = False
+        For Each key In tickers
+            If key = t(1) Then seen = True: Exit For
+        Next key
+        If Not seen Then tickers.Add t(1)
     Next t
 
     ' Dropdown in E1
@@ -98,7 +122,7 @@ Sub GenerateDashboard()
     With wsDash.Range("E1").Validation
         .Add Type:=xlValidateList, _
              AlertStyle:=xlValidAlertStop, _
-             Formula1:="All," & Join(tickers.Keys, ",")
+             Formula1:="All," & Join(tickersToArray(tickers), ",")
         .IgnoreBlank = True
         .InCellDropdown = True
     End With
@@ -106,39 +130,44 @@ Sub GenerateDashboard()
     ' Output placeholder headers
     wsDash.Range("A4:B4").Value = Array("Maturity", "Trades")
 
-    ' Initial draw of chart
+    ' Draw initial chart
     Call UpdateMaturityChart
 End Sub
 
 Sub UpdateMaturityChart()
     Dim wsDash As Worksheet: Set wsDash = ThisWorkbook.Sheets("Dashboard")
     Dim selected As String: selected = wsDash.Range("E1").Value
-    Dim maturityDict As Object: Set maturityDict = CreateObject("Scripting.Dictionary")
+    Dim maturityList As Collection: Set maturityList = New Collection
+    Dim i As Long, j As Long
+    Dim entry(1 To 2) As Variant
+    Dim found As Boolean
+    Dim key As Variant
 
-    Dim i As Long
-    Dim entryArr As Variant
-    Dim ticker As String, maturity As String
-    Dim key
-
-    For Each key In tradeSummary.Keys
-        entryArr = Split(key, "|")
-        ticker = entryArr(0)
-        maturity = entryArr(1)
-        If selected = "All" Or ticker = selected Then
-            If Not maturityDict.exists(maturity) Then
-                maturityDict.Add maturity, tradeSummary(key)
-            Else
-                maturityDict(maturity) = maturityDict(maturity) + tradeSummary(key)
+    ' Build aggregated (maturity, count) data
+    For i = 1 To tradeSummary.Count
+        If selected = "All" Or tradeSummary(i)(1) = selected Then
+            found = False
+            For j = 1 To maturityList.Count
+                If maturityList(j)(1) = tradeSummary(i)(2) Then
+                    maturityList(j)(2) = maturityList(j)(2) + CLng(tradeSummary(i)(3))
+                    found = True
+                    Exit For
+                End If
+            Next j
+            If Not found Then
+                entry(1) = tradeSummary(i)(2) ' Maturity
+                entry(2) = CLng(tradeSummary(i)(3)) ' Count
+                maturityList.Add Array(entry(1), entry(2))
             End If
         End If
-    Next key
+    Next i
 
     ' Output to sheet
     wsDash.Range("A5:B100").ClearContents
     i = 5
-    For Each key In maturityDict.Keys
-        wsDash.Cells(i, 1).Value = key
-        wsDash.Cells(i, 2).Value = maturityDict(key)
+    For Each key In maturityList
+        wsDash.Cells(i, 1).Value = key(0) ' Maturity
+        wsDash.Cells(i, 2).Value = key(1) ' Count
         i = i + 1
     Next key
 
@@ -158,3 +187,19 @@ Sub UpdateMaturityChart()
         .ChartTitle.Text = "Trades by Maturity (" & selected & ")"
     End With
 End Sub
+
+Function tickersToArray(col As Collection) As Variant
+    Dim arr() As String
+    Dim i As Long
+    ReDim arr(0 To col.Count - 1)
+    For i = 1 To col.Count
+        arr(i - 1) = col(i)
+    Next i
+    tickersToArray = arr
+End Function
+
+
+
+
+
+
