@@ -18,51 +18,52 @@ Sub SetupDealerAnalysis()
     End If
     On Error GoTo 0
 
-    ' Dashboard title
-    With ws.Range("B1:F1")
+    ' Title bar styling
+    With ws.Range("B1:G1")
         .Merge
         .Value = "Dealer Activity Overview"
         .Font.Size = 14
         .Font.Bold = True
         .Font.Name = "Segoe UI"
-        .Font.Color = RGB(0, 102, 204)
-        .Interior.Color = RGB(245, 245, 245)
+        .Interior.Color = RGB(0, 102, 204) ' Blue bar
+        .Font.Color = RGB(255, 255, 255)
         .HorizontalAlignment = xlLeft
         .VerticalAlignment = xlCenter
-        .RowHeight = 28
+        .RowHeight = 30
     End With
 
-    ' UI elements
-    With ws
-        .Range("B2").Value = "Dealer:"
-        With .Range("B2")
-            .Font.Bold = True
-            .Font.Size = 11
-            .Font.Name = "Segoe UI"
-            .HorizontalAlignment = xlRight
-        End With
-
-        .Range("C2").ClearContents
-        With .Range("C2")
-            .Interior.Color = RGB(255, 255, 255)
-            .Font.Name = "Segoe UI"
-            .Font.Size = 11
-            .BorderAround xlContinuous, xlThin, xlColorIndexAutomatic
-            .ColumnWidth = 15
-        End With
-
-        .Range("D2").Value = "="
-        With .Range("D2")
-            .Font.Bold = True
-            .Font.Color = RGB(120, 120, 120)
-            .HorizontalAlignment = xlCenter
-        End With
+    ' Dealer input label
+    With ws.Range("B2")
+        .Value = "Dealer:"
+        .Font.Bold = True
+        .Font.Size = 11
+        .Font.Name = "Segoe UI"
+        .HorizontalAlignment = xlRight
     End With
 
-    ' Set initial mode
+    ' Dealer input box
+    With ws.Range("C2")
+        .ClearContents
+        .Interior.Color = RGB(255, 255, 255)
+        .Font.Name = "Segoe UI"
+        .Font.Size = 11
+        .BorderAround xlContinuous, xlThin, xlColorIndexAutomatic
+        .ColumnWidth = 15
+    End With
+
+    ' Equal sign between inputs
+    With ws.Range("D2")
+        .Value = "="
+        .Font.Bold = True
+        .Font.Color = RGB(120, 120, 120)
+        .Font.Name = "Segoe UI"
+        .HorizontalAlignment = xlCenter
+    End With
+
+    ' Set initial chart mode
     dealerMode = "Trades"
 
-    ' Toggle button
+    ' Add toggle button
     Dim btn As Shape
     Set btn = ws.Shapes.AddFormControl(Type:=xlButtonControl, _
         Left:=ws.Range("E2").Left, Top:=ws.Range("E2").Top, Width:=90, Height:=20)
@@ -71,9 +72,10 @@ Sub SetupDealerAnalysis()
         .TextFrame.Characters.Text = "Show Quotes"
         .OnAction = "ToggleDealerChart"
         .TextFrame.Characters.Font.Size = 10
+        .TextFrame.Characters.Font.Name = "Segoe UI"
     End With
 
-    ' Draw initial chart
+    ' Draw chart
     Call DrawDealerChart
 End Sub
 
@@ -128,15 +130,16 @@ SkipRow:
     Next key
     ws.Columns("Z:AA").EntireColumn.Hidden = True
 
-    ' Draw or update chart
+    ' Draw chart
     Dim chartObj As ChartObject
     On Error Resume Next
     Set chartObj = ws.ChartObjects("DealerChart")
     On Error GoTo 0
     If chartObj Is Nothing Then
-        Set chartObj = ws.ChartObjects.Add(Left:=100, Top:=80, Width:=500, Height:=300)
+        Set chartObj = ws.ChartObjects.Add(Left:=100, Top:=100, Width:=520, Height:=300)
         chartObj.Name = "DealerChart"
     End If
+
     With chartObj.Chart
         .ChartType = xlColumnClustered
         .SetSourceData Source:=ws.Range("Z1:AA" & i - 1)
@@ -152,8 +155,10 @@ SkipRow:
         .Axes(xlValue).TickLabels.Font.Size = 10
         .Axes(xlCategory).TickLabels.Font.Name = "Segoe UI"
         .Axes(xlValue).TickLabels.Font.Name = "Segoe UI"
-        .PlotArea.Format.Fill.ForeColor.RGB = RGB(245, 245, 245)
-        .ChartArea.Format.Fill.BackColor.RGB = RGB(250, 250, 250)
-        .ChartArea.Format.Line.Visible = msoFalse
+        On Error Resume Next
+        .PlotArea.Format.Fill.ForeColor.RGB = RGB(255, 255, 255)
+        chartObj.ChartArea.Format.Fill.ForeColor.RGB = RGB(255, 255, 255)
+        chartObj.ChartArea.Format.Line.Visible = msoFalse
+        On Error GoTo 0
     End With
 End Sub
