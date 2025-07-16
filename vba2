@@ -18,64 +18,60 @@ Sub SetupDealerAnalysis()
     End If
     On Error GoTo 0
 
-    ' Title bar styling
+    ' Dashboard title
     With ws.Range("B1:G1")
         .Merge
         .Value = "Dealer Activity Overview"
         .Font.Size = 14
         .Font.Bold = True
         .Font.Name = "Segoe UI"
-        .Interior.Color = RGB(0, 102, 204) ' Blue bar
         .Font.Color = RGB(255, 255, 255)
+        .Interior.Color = RGB(30, 90, 200) ' Blue background
         .HorizontalAlignment = xlLeft
         .VerticalAlignment = xlCenter
         .RowHeight = 30
     End With
 
-    ' Dealer input label
-    With ws.Range("B2")
-        .Value = "Dealer:"
-        .Font.Bold = True
-        .Font.Size = 11
-        .Font.Name = "Segoe UI"
-        .HorizontalAlignment = xlRight
+    ' Leave space and add UI elements on row 4
+    With ws
+        .Range("B4").Value = "Dealer:"
+        With .Range("B4")
+            .Font.Bold = True
+            .Font.Size = 11
+            .Font.Name = "Segoe UI"
+            .HorizontalAlignment = xlRight
+        End With
+
+        .Range("C4").ClearContents
+        With .Range("C4")
+            .Interior.Color = RGB(255, 255, 255)
+            .Font.Name = "Segoe UI"
+            .Font.Size = 11
+            .BorderAround xlContinuous, xlThin, xlColorIndexAutomatic
+            .ColumnWidth = 15
+        End With
+
+        .Range("D4").Value = "="
+        With .Range("D4")
+            .Font.Bold = True
+            .Font.Color = RGB(120, 120, 120)
+            .HorizontalAlignment = xlCenter
+        End With
     End With
 
-    ' Dealer input box
-    With ws.Range("C2")
-        .ClearContents
-        .Interior.Color = RGB(255, 255, 255)
-        .Font.Name = "Segoe UI"
-        .Font.Size = 11
-        .BorderAround xlContinuous, xlThin, xlColorIndexAutomatic
-        .ColumnWidth = 15
-    End With
-
-    ' Equal sign between inputs
-    With ws.Range("D2")
-        .Value = "="
-        .Font.Bold = True
-        .Font.Color = RGB(120, 120, 120)
-        .Font.Name = "Segoe UI"
-        .HorizontalAlignment = xlCenter
-    End With
-
-    ' Set initial chart mode
     dealerMode = "Trades"
 
-    ' Add toggle button
+    ' Toggle button on row 4
     Dim btn As Shape
     Set btn = ws.Shapes.AddFormControl(Type:=xlButtonControl, _
-        Left:=ws.Range("E2").Left, Top:=ws.Range("E2").Top, Width:=90, Height:=20)
+        Left:=ws.Range("E4").Left, Top:=ws.Range("E4").Top, Width:=90, Height:=20)
     With btn
         .Name = "btnToggleDealer"
         .TextFrame.Characters.Text = "Show Quotes"
         .OnAction = "ToggleDealerChart"
         .TextFrame.Characters.Font.Size = 10
-        .TextFrame.Characters.Font.Name = "Segoe UI"
     End With
 
-    ' Draw chart
     Call DrawDealerChart
 End Sub
 
@@ -90,7 +86,7 @@ End Sub
 Sub DrawDealerChart()
     Dim wsData As Worksheet: Set wsData = ThisWorkbook.Sheets("bot")
     Dim ws As Worksheet: Set ws = ThisWorkbook.Sheets("DealerAnalysis")
-    Dim dealerFilter As String: dealerFilter = LCase(Trim(ws.Range("C2").Value))
+    Dim dealerFilter As String: dealerFilter = LCase(Trim(ws.Range("C4").Value))
 
     Dim lastRow As Long: lastRow = wsData.Cells(wsData.Rows.Count, 2).End(xlUp).Row
     Dim dealerDict As Object: Set dealerDict = CreateObject("Scripting.Dictionary")
@@ -118,7 +114,7 @@ Sub DrawDealerChart()
 SkipRow:
     Next i
 
-    ' Output to Z:AA (hidden)
+    ' Output to Z:AA (formatted nicely)
     ws.Range("Z1:AA100").ClearContents
     ws.Range("Z1:AA1").Value = Array("Dealer", dealerMode)
     i = 2
@@ -128,24 +124,31 @@ SkipRow:
         ws.Cells(i, 27).Value = dealerDict(key)
         i = i + 1
     Next key
-    ws.Columns("Z:AA").EntireColumn.Hidden = True
 
-    ' Draw chart
+    With ws.Range("Z1:AA" & i - 1)
+        .Font.Name = "Segoe UI"
+        .Font.Size = 10
+        .Interior.Color = RGB(250, 250, 250)
+        .Borders.LineStyle = xlContinuous
+        .Borders.Weight = xlThin
+        .Columns.AutoFit
+    End With
+
+    ' Draw or update chart
     Dim chartObj As ChartObject
     On Error Resume Next
     Set chartObj = ws.ChartObjects("DealerChart")
     On Error GoTo 0
     If chartObj Is Nothing Then
-        Set chartObj = ws.ChartObjects.Add(Left:=100, Top:=100, Width:=520, Height:=300)
+        Set chartObj = ws.ChartObjects.Add(Left:=100, Top:=120, Width:=500, Height:=300)
         chartObj.Name = "DealerChart"
     End If
-
     With chartObj.Chart
         .ChartType = xlColumnClustered
         .SetSourceData Source:=ws.Range("Z1:AA" & i - 1)
         .HasTitle = True
         .ChartTitle.Text = dealerMode & " per Dealer" & _
-            IIf(dealerFilter <> "", " (" & ws.Range("C2").Value & ")", "")
+            IIf(dealerFilter <> "", " (" & ws.Range("C4").Value & ")", "")
         With .ChartTitle.Font
             .Size = 12
             .Name = "Segoe UI"
@@ -155,10 +158,8 @@ SkipRow:
         .Axes(xlValue).TickLabels.Font.Size = 10
         .Axes(xlCategory).TickLabels.Font.Name = "Segoe UI"
         .Axes(xlValue).TickLabels.Font.Name = "Segoe UI"
-        On Error Resume Next
-        .PlotArea.Format.Fill.ForeColor.RGB = RGB(255, 255, 255)
+        .PlotArea.Format.Fill.ForeColor.RGB = RGB(245, 245, 245)
         chartObj.ChartArea.Format.Fill.ForeColor.RGB = RGB(255, 255, 255)
-        chartObj.ChartArea.Format.Line.Visible = msoFalse
-        On Error GoTo 0
+        chartObj.Format.Line.Visible = msoFalse
     End With
 End Sub
