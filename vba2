@@ -21,11 +21,12 @@ Sub SetupDealerAnalysis()
     ' Dashboard title
     With ws.Range("B1:G1")
         .Merge
-        .Value = "📊 Dealer Activity Overview"
+        .Value = "Dealer Activity Overview"
         .Font.Size = 14
         .Font.Bold = True
         .Font.Name = "Segoe UI"
-        .Interior.Color = RGB(230, 230, 230)
+        .Font.Color = RGB(0, 70, 140) ' Blue title
+        .Interior.Color = RGB(230, 240, 255) ' Light blue header
         .HorizontalAlignment = xlLeft
         .VerticalAlignment = xlCenter
         .RowHeight = 30
@@ -152,7 +153,5 @@ SkipRow:
         .Axes(xlCategory).TickLabels.Font.Name = "Segoe UI"
         .Axes(xlValue).TickLabels.Font.Name = "Segoe UI"
         .PlotArea.Format.Fill.ForeColor.RGB = RGB(245, 245, 245)
-        chartObj.Format.Fill.ForeColor.RGB = RGB(250, 250, 250)
-        chartObj.Format.Line.Visible = msoFalse
     End With
 End Sub
