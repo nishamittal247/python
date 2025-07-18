@@ -1,7 +1,7 @@
 Option Explicit
 
 ' ===============================
-' Setup Dashboard Layout
+' Setup Dashboard
 ' ===============================
 Sub SetupDashboard()
     Dim ws As Worksheet
@@ -20,7 +20,7 @@ Sub SetupDashboard()
     On Error GoTo 0
 
     ' Title
-    With ws.Range("B1:E1")
+    With ws.Range("B1:D1")
         .Merge
         .Value = "Dealer Activity Dashboard"
         .Font.Size = 14
@@ -43,73 +43,90 @@ Sub SetupDashboard()
         .ColumnWidth = 20
     End With
 
-    ' Create "Refresh Data" Button
+    ' Create "Refresh" Button
     Dim btnRefresh As Shape
     Set btnRefresh = ws.Shapes.AddFormControl(xlButtonControl, 350, 20, 140, 25)
     btnRefresh.TextFrame.Characters.Text = "Refresh Dashboard"
     btnRefresh.OnAction = "RefreshDashboard"
 
-    ' Initial Data Load
+    ' Initial Load
     Call RefreshDashboard
 End Sub
 
 ' ===============================
-' Refresh Dashboard (Python + Charts)
+' Refresh Dashboard
 ' ===============================
 Sub RefreshDashboard()
-    Application.Run "xlwings.RunPython", _
-        "import dashboard_calc; dashboard_calc.calculate_dealer_summary()"
+    Dim data As Variant
+    data = GetDataFromPython()
 
-    DrawDealerCharts
+    If IsEmpty(data) Then
+        MsgBox "No data available", vbExclamation
+        Exit Sub
+    End If
+
+    DrawDealerCharts data
 End Sub
 
 ' ===============================
-' Draw Dealer Charts (Quotes + Trades)
+' Call Python & Get Data
 ' ===============================
-Sub DrawDealerCharts()
+Function GetDataFromPython() As Variant
+    Dim obj As Object
+    Set obj = RunPythonReturn("import dashboard_calc; dashboard_calc.get_dealer_summary()")
+    GetDataFromPython = obj
+End Function
+
+' ===============================
+' Draw Charts
+' ===============================
+Sub DrawDealerCharts(data As Variant)
     Dim ws As Worksheet: Set ws = Sheets("Dashboard")
     Dim co As ChartObject
-    Dim lastRow As Long
+    Dim i As Long
+    Dim dealers() As String, quotes() As Double, trades() As Double
+    Dim n As Long
+    
+    ' Parse data
+    n = UBound(data) - LBound(data) + 1
+    ReDim dealers(1 To n)
+    ReDim quotes(1 To n)
+    ReDim trades(1 To n)
+    
+    For i = 1 To n
+        dealers(i) = data(i - 1)(0)
+        quotes(i) = data(i - 1)(1)
+        trades(i) = data(i - 1)(2)
+    Next i
 
     ' Remove old charts
     For Each co In ws.ChartObjects
         co.Delete
     Next co
 
-    ' Determine last row of summary data
-    lastRow = ws.Cells(ws.Rows.Count, 2).End(xlUp).Row
-
-    ' Clear previous data tables on right
-    ws.Range("H10:H100").Resize(, 2).ClearContents
-    ws.Range("H24:H120").Resize(, 2).ClearContents
-
-    ' ===============================
-    ' Quotes Chart
-    ' ===============================
+    ' Draw Quotes Chart
     Set co = ws.ChartObjects.Add(Left:=100, Top:=80, Width:=400, Height:=250)
     co.Name = "QuotesChart"
     With co.Chart
         .ChartType = xlColumnClustered
-        .SetSourceData Source:=ws.Range("B10:C" & lastRow)
+        .SeriesCollection.NewSeries
+        .SeriesCollection(1).Name = "Quotes"
+        .SeriesCollection(1).XValues = dealers
+        .SeriesCollection(1).Values = quotes
         .HasTitle = True
         .ChartTitle.Text = "Quotes per Dealer"
     End With
 
-    ' Copy Quotes data to the right
-    ws.Range("H10:H" & lastRow).Resize(, 2).Value = ws.Range("B10:C" & lastRow).Value
-
-    ' ===============================
-    ' Trades Chart
-    ' ===============================
+    ' Draw Trades Chart
     Set co = ws.ChartObjects.Add(Left:=100, Top:=370, Width:=400, Height:=250)
     co.Name = "TradesChart"
     With co.Chart
         .ChartType = xlColumnClustered
-        .SetSourceData Source:=ws.Range("B10:B" & lastRow).Resize(, 2).Offset(0, 2) ' Dealer + Trades
+        .SeriesCollection.NewSeries
+        .SeriesCollection(1).Name = "Trades"
+        .SeriesCollection(1).XValues = dealers
+        .SeriesCollection(1).Values = trades
         .HasTitle = True
         .ChartTitle.Text = "Trades per Dealer"
     End With
-
-    ' Copy Trades data to the right
-    ws.Range("H24:H" & lastRow + 14).Resize(, 2).Value = ws.Range("B10:B" & lastRow).Resize(, 2).Offset(0, 2).Value
 End Sub
