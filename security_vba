@@ -1,0 +1,152 @@
+Option Explicit
+
+' ===============================
+' Setup Security Dashboard
+' ===============================
+Sub SetupSecurityDashboard()
+    Dim ws As Worksheet
+    On Error Resume Next
+    Set ws = ThisWorkbook.Sheets("SecurityDashboard")
+    If ws Is Nothing Then
+        Set ws = ThisWorkbook.Sheets.Add(After:=Sheets(Sheets.Count))
+        ws.Name = "SecurityDashboard"
+    Else
+        ws.Cells.Clear
+        Dim shp As Shape
+        For Each shp In ws.Shapes
+            shp.Delete
+        Next shp
+    End If
+    On Error GoTo 0
+
+    ' Title
+    With ws.Range("B1:E1")
+        .Merge
+        .Value = "Security-Level Trades Dashboard"
+        .Font.Size = 14
+        .Font.Bold = True
+        .Font.Name = "Segoe UI"
+        .Interior.Color = RGB(30, 90, 200)
+        .Font.Color = vbWhite
+        .HorizontalAlignment = xlCenter
+    End With
+
+    ' Security Filter
+    ws.Range("B4").Value = "Security:"
+    With ws.Range("B4")
+        .Font.Bold = True
+        .Font.Size = 11
+        .HorizontalAlignment = xlRight
+    End With
+
+    ' Filter Input Cell
+    With ws.Range("C4")
+        .ClearContents
+        .Font.Name = "Segoe UI"
+        .Font.Size = 11
+        .Interior.Color = RGB(255, 255, 255)
+        .Borders.LineStyle = xlContinuous
+        .Borders.Weight = xlThin
+        .ColumnWidth = 20
+    End With
+
+    ' Refresh Button
+    Dim btn As Shape
+    Set btn = ws.Shapes.AddFormControl(xlButtonControl, ws.Range("D4").Left, ws.Range("D4").Top, ws.Range("D4").Width + 20, ws.Range("D4").Height + 4)
+    btn.OLEFormat.Object.Caption = "Refresh Dashboard"
+    btn.OnAction = "RefreshSecurityDashboard"
+
+    ' Initial Load
+    Call RefreshSecurityDashboard
+End Sub
+
+' ===============================
+' Refresh Security Dashboard
+' ===============================
+Sub RefreshSecurityDashboard()
+    Dim result As Variant
+    result = RunPythonSecurityArray()
+
+    If IsEmpty(result) Then
+        MsgBox "No traded data found", vbExclamation
+        Exit Sub
+    End If
+
+    DrawSecurityChart result
+End Sub
+
+' ===============================
+' Call Python and Get Array
+' ===============================
+Function RunPythonSecurityArray() As Variant
+    Dim wb As Workbook: Set wb = ThisWorkbook
+    Dim tempRange As Range
+    Set tempRange = wb.Sheets("SecurityDashboard").Range("Z1")
+
+    ' Clear previous temp data
+    tempRange.Resize(200, 2).Clear
+
+    ' Python writes directly to range Z1
+    Application.Run "xlwings.RunPython", _
+        "import security_calc; " & _
+        "import xlwings as xw; " & _
+        "xw.Book.caller().sheets['SecurityDashboard'].range('Z1').value = security_calc.get_security_summary()"
+
+    ' Load data back into VBA array
+    RunPythonSecurityArray = tempRange.CurrentRegion.Value
+
+    ' Optional: Clear temp
+    tempRange.Resize(200, 2).Clear
+End Function
+
+' ===============================
+' Draw Security Chart
+' ===============================
+Sub DrawSecurityChart(data As Variant)
+    Dim ws As Worksheet: Set ws = Sheets("SecurityDashboard")
+    Dim co As ChartObject
+    Dim i As Long, n As Long
+    Dim maturities() As String, amounts() As Double
+
+    n = UBound(data, 1)
+    ReDim maturities(1 To n)
+    ReDim amounts(1 To n)
+
+    For i = 1 To n
+        maturities(i) = data(i, 1)
+        amounts(i) = data(i, 2)
+    Next i
+
+    ' Remove old charts
+    For Each co In ws.ChartObjects
+        co.Delete
+    Next co
+
+    ' Place Data Table
+    ws.Range("J6:K100").Clear
+    ws.Range("J6").Value = "Maturity"
+    ws.Range("K6").Value = "Total Trades"
+    For i = 1 To n
+        ws.Cells(6 + i, "J").Value = maturities(i)
+        ws.Cells(6 + i, "K").Value = amounts(i)
+    Next i
+    With ws.Range("J6:K" & 6 + n)
+        .Font.Name = "Segoe UI"
+        .Font.Size = 10
+        .Borders.LineStyle = xlContinuous
+        .Borders.Weight = xlThin
+    End With
+
+    ' Draw Chart
+    Set co = ws.ChartObjects.Add(Left:=ws.Range("B6").Left, Top:=ws.Range("B6").Top, Width:=450, Height:=250)
+    With co.Chart
+        .ChartType = xlColumnClustered
+        .SeriesCollection.NewSeries
+        .SeriesCollection(1).Name = "Total Trades"
+        .SeriesCollection(1).XValues = ws.Range("J7:J" & 6 + n)
+        .SeriesCollection(1).Values = ws.Range("K7:K" & 6 + n)
+        .HasTitle = True
+        .ChartTitle.Text = "Maturity vs Total Traded Amount"
+        .Axes(xlCategory).TickLabels.Orientation = 45
+    End With
+End Sub
