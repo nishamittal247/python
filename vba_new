@@ -127,16 +127,16 @@ Sub DrawDealerCharts(data As Variant)
     Next co
 
     ' ===============================
-    ' Place Quotes Data Table
+    ' Place Quotes Data Table (shifted to I:J)
     ' ===============================
-    ws.Range("H6:I100").Clear
-    ws.Range("H6").Value = "Dealer"
-    ws.Range("I6").Value = "Quotes"
+    ws.Range("I6:J100").Clear
+    ws.Range("I6").Value = "Dealer"
+    ws.Range("J6").Value = "Quotes"
     For i = 1 To n
-        ws.Cells(6 + i, "H").Value = dealers(i)
-        ws.Cells(6 + i, "I").Value = quotes(i)
+        ws.Cells(6 + i, "I").Value = dealers(i)
+        ws.Cells(6 + i, "J").Value = quotes(i)
     Next i
-    With ws.Range("H6:I" & 6 + n)
+    With ws.Range("I6:J" & 6 + n)
         .Font.Name = "Segoe UI"
         .Font.Size = 10
         .Borders.LineStyle = xlContinuous
@@ -144,16 +144,16 @@ Sub DrawDealerCharts(data As Variant)
     End With
 
     ' ===============================
-    ' Place Trades Data Table
+    ' Place Trades Data Table (shifted to I:J)
     ' ===============================
-    ws.Range("H26:I100").Clear
-    ws.Range("H26").Value = "Dealer"
-    ws.Range("I26").Value = "Trades"
+    ws.Range("I26:J100").Clear
+    ws.Range("I26").Value = "Dealer"
+    ws.Range("J26").Value = "Trades"
     For i = 1 To n
-        ws.Cells(26 + i, "H").Value = dealers(i)
-        ws.Cells(26 + i, "I").Value = trades(i)
+        ws.Cells(26 + i, "I").Value = dealers(i)
+        ws.Cells(26 + i, "J").Value = trades(i)
     Next i
-    With ws.Range("H26:I" & 26 + n)
+    With ws.Range("I26:J" & 26 + n)
         .Font.Name = "Segoe UI"
         .Font.Size = 10
         .Borders.LineStyle = xlContinuous
@@ -168,8 +168,8 @@ Sub DrawDealerCharts(data As Variant)
         .ChartType = xlColumnClustered
         .SeriesCollection.NewSeries
         .SeriesCollection(1).Name = "Quotes"
-        .SeriesCollection(1).XValues = ws.Range("H7:H" & 6 + n)
-        .SeriesCollection(1).Values = ws.Range("I7:I" & 6 + n)
+        .SeriesCollection(1).XValues = ws.Range("I7:I" & 6 + n)
+        .SeriesCollection(1).Values = ws.Range("J7:J" & 6 + n)
         .HasTitle = True
         .ChartTitle.Text = "Quotes per Dealer"
     End With
@@ -182,8 +182,8 @@ Sub DrawDealerCharts(data As Variant)
         .ChartType = xlColumnClustered
         .SeriesCollection.NewSeries
         .SeriesCollection(1).Name = "Trades"
-        .SeriesCollection(1).XValues = ws.Range("H27:H" & 26 + n)
-        .SeriesCollection(1).Values = ws.Range("I27:I" & 26 + n)
+        .SeriesCollection(1).XValues = ws.Range("I27:I" & 26 + n)
+        .SeriesCollection(1).Values = ws.Range("J27:J" & 26 + n)
         .HasTitle = True
         .ChartTitle.Text = "Trades per Dealer"
     End With
