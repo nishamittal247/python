@@ -1,0 +1,115 @@
+Option Explicit
+
+' ===============================
+' Setup Dashboard Layout and Buttons
+' ===============================
+Sub SetupDashboard()
+    Dim ws As Worksheet
+    On Error Resume Next
+    Set ws = ThisWorkbook.Sheets("Dashboard")
+    If ws Is Nothing Then
+        Set ws = ThisWorkbook.Sheets.Add(After:=Sheets(Sheets.Count))
+        ws.Name = "Dashboard"
+    Else
+        ws.Cells.Clear
+        Dim shp As Shape
+        For Each shp In ws.Shapes
+            shp.Delete
+        Next shp
+    End If
+    On Error GoTo 0
+
+    ' Title
+    With ws.Range("B1:D1")
+        .Merge
+        .Value = "Dealer Activity Overview"
+        .Font.Size = 14
+        .Font.Bold = True
+        .Font.Name = "Segoe UI"
+        .Interior.Color = RGB(30, 90, 200)
+        .Font.Color = vbWhite
+        .HorizontalAlignment = xlCenter
+    End With
+
+    ' Dealer Filter Cell
+    ws.Range("B4").Value = "Dealer:"
+    With ws.Range("C4")
+        .ClearContents
+        .Font.Name = "Segoe UI"
+        .Font.Size = 11
+        .Interior.Color = RGB(255, 255, 255)
+        .Borders.LineStyle = xlContinuous
+        .Borders.Weight = xlThin
+        .ColumnWidth = 20
+    End With
+
+    ' Create "Show Quotes" Button
+    Dim btnQuotes As Shape
+    Set btnQuotes = ws.Shapes.AddFormControl(xlButtonControl, 100, 50, 100, 25)
+    btnQuotes.OnAction = "ShowQuotes"
+    btnQuotes.TextFrame.Characters.Text = "Show Quotes"
+    btnQuotes.Name = "btnQuotes"
+
+    ' Create "Show Trades" Button
+    Dim btnTrades As Shape
+    Set btnTrades = ws.Shapes.AddFormControl(xlButtonControl, 220, 50, 100, 25)
+    btnTrades.OnAction = "ShowTrades"
+    btnTrades.TextFrame.Characters.Text = "Show Trades"
+    btnTrades.Name = "btnTrades"
+
+    ' Load Quotes by default
+    Call ShowQuotes
+End Sub
+
+' ===============================
+' Show Quotes Button
+' ===============================
+Sub ShowQuotes()
+    Application.Run "xlwings.RunPython", _
+        "import dashboard_calc; dashboard_calc.calculate_dealer_summary()"
+    DrawDealerChart "Quotes"
+End Sub
+
+' ===============================
+' Show Trades Button
+' ===============================
+Sub ShowTrades()
+    Application.Run "xlwings.RunPython", _
+        "import dashboard_calc; dashboard_calc.calculate_dealer_summary()"
+    DrawDealerChart "Trades"
+End Sub
+
+' ===============================
+' Draw Dealer Chart
+' ===============================
+Sub DrawDealerChart(mode As String)
+    Dim ws As Worksheet: Set ws = Sheets("Dashboard")
+    Dim co As ChartObject
+    Dim lastRow As Long
+    Dim colNum As Integer
+
+    ' Remove old chart
+    For Each co In ws.ChartObjects
+        If co.Name = "DealerChart" Then co.Delete
+    Next co
+
+    ' Determine column number
+    If mode = "Quotes" Then
+        colNum = 3 ' Column C
+    Else
+        colNum = 4 ' Column D
+    End If
+
+    lastRow = ws.Cells(ws.Rows.Count, 2).End(xlUp).Row
+
+    ' Add new chart
+    Set co = ws.ChartObjects.Add(Left:=100, Top:=120, Width:=400, Height:=250)
+    co.Name = "DealerChart"
+
+    With co.Chart
+        .ChartType = xlColumnClustered
+        .SetSourceData Source:=ws.Range(ws.Cells(10, 2), ws.Cells(lastRow, colNum))
+        .HasTitle = True
+        .ChartTitle.Text = mode & " per Dealer"
+    End With
+End Sub
