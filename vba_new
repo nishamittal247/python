@@ -1,7 +1,7 @@
 Option Explicit
 
 ' ===============================
-' Setup Dashboard Layout and Buttons
+' Setup Dashboard Layout
 ' ===============================
 Sub SetupDashboard()
     Dim ws As Worksheet
@@ -20,9 +20,9 @@ Sub SetupDashboard()
     On Error GoTo 0
 
     ' Title
-    With ws.Range("B1:D1")
+    With ws.Range("B1:E1")
         .Merge
-        .Value = "Dealer Activity Overview"
+        .Value = "Dealer Activity Dashboard"
         .Font.Size = 14
         .Font.Bold = True
         .Font.Name = "Segoe UI"
@@ -43,73 +43,73 @@ Sub SetupDashboard()
         .ColumnWidth = 20
     End With
 
-    ' Create "Show Quotes" Button
-    Dim btnQuotes As Shape
-    Set btnQuotes = ws.Shapes.AddFormControl(xlButtonControl, 100, 50, 100, 25)
-    btnQuotes.OnAction = "ShowQuotes"
-    btnQuotes.TextFrame.Characters.Text = "Show Quotes"
-    btnQuotes.Name = "btnQuotes"
+    ' Create "Refresh Data" Button
+    Dim btnRefresh As Shape
+    Set btnRefresh = ws.Shapes.AddFormControl(xlButtonControl, 350, 20, 140, 25)
+    btnRefresh.TextFrame.Characters.Text = "Refresh Dashboard"
+    btnRefresh.OnAction = "RefreshDashboard"
 
-    ' Create "Show Trades" Button
-    Dim btnTrades As Shape
-    Set btnTrades = ws.Shapes.AddFormControl(xlButtonControl, 220, 50, 100, 25)
-    btnTrades.OnAction = "ShowTrades"
-    btnTrades.TextFrame.Characters.Text = "Show Trades"
-    btnTrades.Name = "btnTrades"
-
-    ' Load Quotes by default
-    Call ShowQuotes
+    ' Initial Data Load
+    Call RefreshDashboard
 End Sub
 
 ' ===============================
-' Show Quotes Button
+' Refresh Dashboard (Python + Charts)
 ' ===============================
-Sub ShowQuotes()
+Sub RefreshDashboard()
     Application.Run "xlwings.RunPython", _
         "import dashboard_calc; dashboard_calc.calculate_dealer_summary()"
-    DrawDealerChart "Quotes"
+
+    DrawDealerCharts
 End Sub
 
 ' ===============================
-' Show Trades Button
+' Draw Dealer Charts (Quotes + Trades)
 ' ===============================
-Sub ShowTrades()
-    Application.Run "xlwings.RunPython", _
-        "import dashboard_calc; dashboard_calc.calculate_dealer_summary()"
-    DrawDealerChart "Trades"
-End Sub
-
-' ===============================
-' Draw Dealer Chart
-' ===============================
-Sub DrawDealerChart(mode As String)
+Sub DrawDealerCharts()
     Dim ws As Worksheet: Set ws = Sheets("Dashboard")
     Dim co As ChartObject
     Dim lastRow As Long
-    Dim colNum As Integer
 
-    ' Remove old chart
+    ' Remove old charts
     For Each co In ws.ChartObjects
-        If co.Name = "DealerChart" Then co.Delete
+        co.Delete
     Next co
 
-    ' Determine column number
-    If mode = "Quotes" Then
-        colNum = 3 ' Column C
-    Else
-        colNum = 4 ' Column D
-    End If
-
+    ' Determine last row of summary data
     lastRow = ws.Cells(ws.Rows.Count, 2).End(xlUp).Row
 
-    ' Add new chart
-    Set co = ws.ChartObjects.Add(Left:=100, Top:=120, Width:=400, Height:=250)
-    co.Name = "DealerChart"
+    ' Clear previous data tables on right
+    ws.Range("H10:H100").Resize(, 2).ClearContents
+    ws.Range("H24:H120").Resize(, 2).ClearContents
 
+    ' ===============================
+    ' Quotes Chart
+    ' ===============================
+    Set co = ws.ChartObjects.Add(Left:=100, Top:=80, Width:=400, Height:=250)
+    co.Name = "QuotesChart"
     With co.Chart
         .ChartType = xlColumnClustered
-        .SetSourceData Source:=ws.Range(ws.Cells(10, 2), ws.Cells(lastRow, colNum))
+        .SetSourceData Source:=ws.Range("B10:C" & lastRow)
         .HasTitle = True
-        .ChartTitle.Text = mode & " per Dealer"
+        .ChartTitle.Text = "Quotes per Dealer"
     End With
+
+    ' Copy Quotes data to the right
+    ws.Range("H10:H" & lastRow).Resize(, 2).Value = ws.Range("B10:C" & lastRow).Value
+
+    ' ===============================
+    ' Trades Chart
+    ' ===============================
+    Set co = ws.ChartObjects.Add(Left:=100, Top:=370, Width:=400, Height:=250)
+    co.Name = "TradesChart"
+    With co.Chart
+        .ChartType = xlColumnClustered
+        .SetSourceData Source:=ws.Range("B10:B" & lastRow).Resize(, 2).Offset(0, 2) ' Dealer + Trades
+        .HasTitle = True
+        .ChartTitle.Text = "Trades per Dealer"
+    End With
+
+    ' Copy Trades data to the right
+    ws.Range("H24:H" & lastRow + 14).Resize(, 2).Value = ws.Range("B10:B" & lastRow).Resize(, 2).Offset(0, 2).Value
 End Sub
