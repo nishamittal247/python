@@ -31,7 +31,7 @@ Sub SetupDashboard()
         .HorizontalAlignment = xlCenter
     End With
 
-    ' Dealer Filter Cell
+    ' Dealer Filter
     ws.Range("B4").Value = "Dealer:"
     With ws.Range("C4")
         .ClearContents
@@ -43,11 +43,11 @@ Sub SetupDashboard()
         .ColumnWidth = 20
     End With
 
-    ' Create "Refresh" Button
-    Dim btnRefresh As Shape
-    Set btnRefresh = ws.Shapes.AddFormControl(xlButtonControl, 350, 20, 140, 25)
-    btnRefresh.TextFrame.Characters.Text = "Refresh Dashboard"
-    btnRefresh.OnAction = "RefreshDashboard"
+    ' Refresh Button
+    Dim btn As Shape
+    Set btn = ws.Shapes.AddFormControl(xlButtonControl, 350, 20, 140, 25)
+    btn.TextFrame.Characters.Text = "Refresh Dashboard"
+    btn.OnAction = "RefreshDashboard"
 
     ' Initial Load
     Call RefreshDashboard
@@ -57,24 +57,38 @@ End Sub
 ' Refresh Dashboard
 ' ===============================
 Sub RefreshDashboard()
-    Dim data As Variant
-    data = GetDataFromPython()
-
-    If IsEmpty(data) Then
-        MsgBox "No data available", vbExclamation
+    Dim result As Variant
+    result = RunPythonAndReturnArray()
+    If IsEmpty(result) Then
+        MsgBox "No data returned from Python", vbExclamation
         Exit Sub
     End If
-
-    DrawDealerCharts data
+    DrawDealerCharts result
 End Sub
 
 ' ===============================
-' Call Python & Get Data
+' Call Python and Get Array
 ' ===============================
-Function GetDataFromPython() As Variant
-    Dim obj As Object
-    Set obj = RunPythonReturn("import dashboard_calc; dashboard_calc.get_dealer_summary()")
-    GetDataFromPython = obj
+Function RunPythonAndReturnArray() As Variant
+    ' Use RunPython with a temp sheet to store the array
+    Dim wb As Workbook: Set wb = ThisWorkbook
+    Dim tempRange As Range
+    Set tempRange = wb.Sheets("Dashboard").Range("Z1")
+
+    ' Clear previous temp data
+    tempRange.Resize(100, 5).Clear
+
+    ' Python writes directly to range Z1 temporarily
+    Application.Run "xlwings.RunPython", _
+        "import dashboard_calc; " & _
+        "import xlwings as xw; " & _
+        "xw.Book.caller().sheets['Dashboard'].range('Z1').value = dashboard_calc.get_dealer_summary()"
+
+    ' Load data back into VBA array
+    RunPythonAndReturnArray = tempRange.CurrentRegion.Value
+
+    ' Optional: Clear temp
+    tempRange.Resize(100, 5).Clear
 End Function
 
 ' ===============================
@@ -83,20 +97,18 @@ End Function
 Sub DrawDealerCharts(data As Variant)
     Dim ws As Worksheet: Set ws = Sheets("Dashboard")
     Dim co As ChartObject
-    Dim i As Long
+    Dim i As Long, n As Long
     Dim dealers() As String, quotes() As Double, trades() As Double
-    Dim n As Long
-    
-    ' Parse data
-    n = UBound(data) - LBound(data) + 1
+
+    n = UBound(data, 1)
     ReDim dealers(1 To n)
     ReDim quotes(1 To n)
     ReDim trades(1 To n)
-    
+
     For i = 1 To n
-        dealers(i) = data(i - 1)(0)
-        quotes(i) = data(i - 1)(1)
-        trades(i) = data(i - 1)(2)
+        dealers(i) = data(i, 1)
+        quotes(i) = data(i, 2)
+        trades(i) = data(i, 3)
     Next i
 
     ' Remove old charts
@@ -104,9 +116,8 @@ Sub DrawDealerCharts(data As Variant)
         co.Delete
     Next co
 
-    ' Draw Quotes Chart
+    ' Quotes Chart
     Set co = ws.ChartObjects.Add(Left:=100, Top:=80, Width:=400, Height:=250)
-    co.Name = "QuotesChart"
     With co.Chart
         .ChartType = xlColumnClustered
         .SeriesCollection.NewSeries
@@ -117,9 +128,8 @@ Sub DrawDealerCharts(data As Variant)
         .ChartTitle.Text = "Quotes per Dealer"
     End With
 
-    ' Draw Trades Chart
+    ' Trades Chart
     Set co = ws.ChartObjects.Add(Left:=100, Top:=370, Width:=400, Height:=250)
-    co.Name = "TradesChart"
     With co.Chart
         .ChartType = xlColumnClustered
         .SeriesCollection.NewSeries
