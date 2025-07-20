@@ -1,0 +1,173 @@
+Option Explicit
+
+Sub RefreshSecurityDashboardCombined()
+    Dim results As Variant
+    results = RunPythonSecurityArrayCombined()
+
+    If IsEmpty(results) Then
+        MsgBox "No traded data found", vbExclamation
+        Exit Sub
+    End If
+
+    Call DrawAllCharts(results)
+End Sub
+
+Function RunPythonSecurityArrayCombined() As Variant
+    Dim wb As Workbook: Set wb = ThisWorkbook
+    Dim ws As Worksheet: Set ws = wb.Sheets("SecurityDashboard")
+    Dim range1 As Range, range2 As Range, range3 As Range
+
+    Set range1 = ws.Range("Z1")
+    Set range2 = ws.Range("AB1")
+    Set range3 = ws.Range("AD1")
+
+    ' Clear temp zones
+    range1.Resize(200, 5).ClearContents
+    range2.Resize(200, 5).ClearContents
+    range3.Resize(200, 5).ClearContents
+
+    ' Python call
+    Application.Run "xlwings.RunPython", _
+        "import dashboard_calc; dashboard_calc.push_all_data()"
+
+    ' Read back into VBA
+    Dim result(1 To 3) As Variant
+    result(1) = range1.CurrentRegion.Value
+    result(2) = range2.CurrentRegion.Value
+    result(3) = range3.CurrentRegion.Value
+
+    RunPythonSecurityArrayCombined = result
+
+    ' Optional clear
+    range1.Resize(200, 5).ClearContents
+    range2.Resize(200, 5).ClearContents
+    range3.Resize(200, 5).ClearContents
+End Function
+
+Sub DrawAllCharts(results As Variant)
+    Dim ws As Worksheet: Set ws = Sheets("SecurityDashboard")
+    Dim data1 As Variant, data2 As Variant, data3 As Variant
+    data1 = results(1): data2 = results(2): data3 = results(3)
+
+    ' Clear all chart objects first
+    Dim co As ChartObject
+    For Each co In ws.ChartObjects
+        co.Delete
+    Next co
+
+    ' Chart 1: Trades per Maturity
+    Call PlotBarChart(ws, data1, "B6", "Maturity", "Trades", "Trades per Security", "J6", "K6")
+
+    ' Chart 2: Quotes per Dealer (Pie)
+    Call PlotPieChart(ws, data2, "B26", "Dealer", "Total Quotes", "Security Quotes per Dealer", "J26", "K26")
+
+    ' Chart 3: Financing Over Time (Min/Max/Mean)
+    Call PlotLineChart(ws, data3, "B46", "Dates", Array("Min", "Max", "Mean"), "Financing Over Time", "J46", "M46")
+End Sub
+
+' Helper to draw bar chart
+Sub PlotBarChart(ws As Worksheet, data As Variant, anchorCell As String, xLabel As String, yLabel As String, chartTitle As String, xRangeStart As String, yRangeStart As String)
+    Dim i As Long, n As Long
+    n = UBound(data, 1)
+    Dim xValues() As String, yValues() As Double
+    ReDim xValues(1 To n)
+    ReDim yValues(1 To n)
+
+    For i = 1 To n
+        xValues(i) = data(i, 1)
+        yValues(i) = data(i, 2)
+    Next i
+
+    ws.Range(xRangeStart & ":" & yRangeStart & "100").Clear
+    ws.Range(xRangeStart).Value = xLabel
+    ws.Range(yRangeStart).Value = yLabel
+
+    For i = 1 To n
+        ws.Cells(6 + i, "J").Value = xValues(i)
+        ws.Cells(6 + i, "K").Value = yValues(i)
+    Next i
+
+    SetChart ws, anchorCell, "J7:J" & 6 + n, "K7:K" & 6 + n, chartTitle, xlColumnClustered
+End Sub
+
+' Helper to draw pie chart
+Sub PlotPieChart(ws As Worksheet, data As Variant, anchorCell As String, xLabel As String, yLabel As String, chartTitle As String, xRangeStart As String, yRangeStart As String)
+    Dim i As Long, n As Long
+    n = UBound(data, 1)
+    Dim xValues() As String, yValues() As Double
+    ReDim xValues(1 To n)
+    ReDim yValues(1 To n)
+
+    For i = 1 To n
+        xValues(i) = data(i, 1)
+        yValues(i) = data(i, 2)
+    Next i
+
+    ws.Range(xRangeStart & ":" & yRangeStart & "100").Clear
+    ws.Range(xRangeStart).Value = xLabel
+    ws.Range(yRangeStart).Value = yLabel
+
+    For i = 1 To n
+        ws.Cells(26 + i, "J").Value = xValues(i)
+        ws.Cells(26 + i, "K").Value = yValues(i)
+    Next i
+
+    SetChart ws, anchorCell, "J27:J" & 26 + n, "K27:K" & 26 + n, chartTitle, xlPie
+End Sub
+
+' Helper to draw financing chart
+Sub PlotLineChart(ws As Worksheet, data As Variant, anchorCell As String, xLabel As String, yLabels As Variant, chartTitle As String, xStart As String, yStart As String)
+    Dim i As Long, n As Long
+    n = UBound(data, 1)
+    Dim dates() As String, minF() As Variant, maxF() As Variant, meanF() As Variant
+    ReDim dates(1 To n)
+    ReDim minF(1 To n)
+    ReDim maxF(1 To n)
+    ReDim meanF(1 To n)
+
+    For i = 1 To n
+        dates(i) = data(i, 1)
+        minF(i) = data(i, 2)
+        maxF(i) = data(i, 3)
+        meanF(i) = data(i, 4)
+    Next i
+
+    ws.Range(xStart & ":M100").Clear
+    ws.Range(xStart).Value = xLabel
+    ws.Range("K46").Value = yLabels(0)
+    ws.Range("L46").Value = yLabels(1)
+    ws.Range("M46").Value = yLabels(2)
+
+    For i = 1 To n
+        ws.Cells(46 + i, "J").Value = dates(i)
+        ws.Cells(46 + i, "K").Value = minF(i)
+        ws.Cells(46 + i, "L").Value = maxF(i)
+        ws.Cells(46 + i, "M").Value = meanF(i)
+    Next i
+
+    Dim co As ChartObject
+    Set co = ws.ChartObjects.Add(Left:=ws.Range(anchorCell).Left, Top:=ws.Range(anchorCell).Top, Width:=500, Height:=250)
+    With co.Chart
+        .ChartType = xlLineMarkers
+        .SetSourceData Source:=ws.Range("J47:M" & 46 + n)
+        .HasTitle = True
+        .ChartTitle.Text = chartTitle
+        .Axes(xlCategory).TickLabels.Orientation = 45
+    End With
+End Sub
+
+' Generic chart placement
+Sub SetChart(ws As Worksheet, anchorCell As String, xRange As String, yRange As String, title As String, chartType As XlChartType)
+    Dim co As ChartObject
+    Set co = ws.ChartObjects.Add(Left:=ws.Range(anchorCell).Left, Top:=ws.Range(anchorCell).Top, Width:=400, Height:=250)
+    With co.Chart
+        .ChartType = chartType
+        .SeriesCollection.NewSeries
+        .SeriesCollection(1).Name = title
+        .SeriesCollection(1).XValues = ws.Range(xRange)
+        .SeriesCollection(1).Values = ws.Range(yRange)
+        .HasTitle = True
+        .ChartTitle.Text = title
+        .Axes(xlCategory).TickLabels.Orientation = 45
+    End With
+End Sub
