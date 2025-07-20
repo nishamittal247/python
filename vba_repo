@@ -1,49 +1,57 @@
 import xlwings as xw
 import pandas as pd
 
-def create_repo_comparison():
+def create_repo_comparison_debug():
     wb = xw.Book.caller()
     ws = wb.sheets['RepoComp']
     ws.clear()  # Clear sheet
 
-    # Load data
+    # --- Load bot (dealer quotes) ---
     bot_df = wb.sheets['bot'].range('A1').expand().options(pd.DataFrame, header=1).value
+    bot_df.columns = [c.lower() for c in bot_df.columns]  # ensure lower case
+
+    # --- Load internal repo markings ---
     internal_df = wb.sheets['internal_repo_markings'].range('A1').expand().options(pd.DataFrame, header=1).value
-    
-    # Convert date columns
-    bot_df['Date'] = pd.to_datetime(bot_df['Date'])
-    internal_df['Date'] = pd.to_datetime(internal_df['Date'])
+    internal_df.columns = [c.lower() for c in internal_df.columns]
 
-    # Merge dealer and internal data
-    merged_df = pd.merge(bot_df, internal_df, on=['Date', 'Ticker'], suffixes=('', '_Internal'))
-    
-    # Create pivot table for Heatmap
-    heatmap_df = merged_df.pivot_table(
-        index=['Date', 'Ticker'],
-        columns='Dealer',
-        values='Implied Financing',
-        aggfunc='mean'
-    ).reset_index()
-    heatmap_df = pd.merge(heatmap_df, internal_df, on=['Date', 'Ticker'])
+    # Convert dates
+    bot_df['date'] = pd.to_datetime(bot_df['date'])
+    internal_df['date'] = pd.to_datetime(internal_df['date'])
 
-    # Add Avg Dealer
-    dealer_cols = [c for c in heatmap_df.columns if c not in ['Date', 'Ticker', 'Internal Financing']]
-    heatmap_df['Avg Dealer'] = heatmap_df[dealer_cols].mean(axis=1)
+    # Merge dealer quotes with internal financing
+    merged_df = pd.merge(bot_df, internal_df, on=['date', 'ticker'], how='inner', suffixes=('', '_internal'))
 
-    # Line chart data
-    linechart_df = heatmap_df[['Date', 'Ticker', 'Internal Financing', 'Avg Dealer']]
+    # Calculate difference and signal
+    merged_df['diff_bps'] = merged_df['implied_financing'] - merged_df['markings']
+    merged_df['signal'] = merged_df['diff_bps'].apply(lambda x: 'Cheap' if x < 0 else 'Expensive')
 
-    # Dealer Beat Count
-    beat_count = {
-        dealer: (heatmap_df[dealer] < heatmap_df['Internal Financing']).sum()
-        for dealer in dealer_cols
-    }
-    dealer_count_df = pd.DataFrame(list(beat_count.items()), columns=['Dealer', 'Days Cheaper'])
+    # Create summary: avg dealer vs internal
+    summary_df = merged_df.groupby(['date', 'ticker'], as_index=False).agg({
+        'implied_financing': 'mean',
+        'markings': 'first'
+    })
+    summary_df.rename(columns={'implied_financing': 'avg_dealer', 'markings': 'internal'}, inplace=True)
 
-    # --- Write tables to RepoComp ---
-    ws.range('A2').value = heatmap_df
-    ws.range(f"A{heatmap_df.shape[0] + 4}").value = linechart_df
-    ws.range(f"A{heatmap_df.shape[0] + linechart_df.shape[0] + 6}").value = dealer_count_df
+    # Dealer beat count (count of quotes cheaper than internal)
+    beat_count_df = merged_df.groupby('ticker').apply(
+        lambda x: (x['implied_financing'] < x['markings']).sum()
+    ).reset_index(name='days_cheaper')
+
+    # --- Write results to RepoComp ---
+    ws.range('A1').value = "DEBUG: Merged Data"
+    ws.range('A2').value = merged_df
+
+    start_row = merged_df.shape[0] + 4
+    ws.range(f"A{start_row}").value = "DEBUG: Avg Dealer vs Internal"
+    ws.range(f"A{start_row + 1}").value = summary_df
+
+    start_row2 = start_row + summary_df.shape[0] + 4
+    ws.range(f"A{start_row2}").value = "DEBUG: Dealer Beat Count"
+    ws.range(f"A{start_row2 + 1}").value = beat_count_df
+
+    print("Merged DF:\n", merged_df.head())
+    print("Summary DF:\n", summary_df.head())
+    print("Beat Count DF:\n", beat_count_df.head())
 
 
 
