@@ -68,44 +68,67 @@ Sub RefreshRepoComparison()
     ' After Python pushes data, build charts
     CreateRepoCharts
 End Sub
-
 Sub CreateRepoCharts()
     Dim ws As Worksheet
     Set ws = Sheets("RepoComp")
-    Dim lastRow As Long
     
-    ' Clear existing charts
     Dim co As ChartObject
+    Dim lastRow As Long
+    Dim avgStart As Long, avgEnd As Long
+    Dim beatStart As Long, beatEnd As Long
+    
+    ' --- Clear old charts ---
     For Each co In ws.ChartObjects
         co.Delete
     Next co
-
-    ' Heatmap: (We apply conditional formatting manually here)
-    ' Line Chart
-    lastRow = ws.Cells(ws.Rows.Count, "A").End(xlUp).Row
-    Dim avgStart As Long, avgEnd As Long
-    avgStart = ws.Range("A:A").Find("Internal vs Avg Dealer (Line Chart Data)").Row + 1
-    avgEnd = ws.Range("A:A").Find("Dealer Beat Count").Row - 2
     
+    ' --- Detect Heatmap Table ---
+    ' The first table starts at A2
+    Dim firstTableEnd As Long
+    firstTableEnd = ws.Cells(ws.Rows.Count, "A").End(xlUp).Row
+    If firstTableEnd < 5 Then
+        MsgBox "No data found in RepoComp.", vbExclamation
+        Exit Sub
+    End If
+    
+    ' Locate the start of the 2nd table (Internal vs Avg Dealer)
+    ' It is just below the first table + 2 rows
+    avgStart = firstTableEnd + 2
+    ' Detect last row of the 2nd table
+    avgEnd = ws.Cells(ws.Rows.Count, "A").End(xlUp).Row
+    Dim i As Long
+    For i = avgStart To avgEnd
+        If ws.Cells(i, 1).Value = "" Then
+            avgEnd = i - 1
+            Exit For
+        End If
+    Next i
+    
+    ' --- Detect Dealer Beat Count Table ---
+    beatStart = avgEnd + 3
+    beatEnd = beatStart
+    Do While ws.Cells(beatEnd, 1).Value <> "" Or ws.Cells(beatEnd, 2).Value <> ""
+        beatEnd = beatEnd + 1
+    Loop
+    beatEnd = beatEnd - 1
+    
+    ' --- Create Line Chart (Internal vs Avg Dealer) ---
     Set co = ws.ChartObjects.Add(Left:=ws.Range("I2").Left, Top:=ws.Range("I2").Top, Width:=400, Height:=250)
     With co.Chart
         .ChartType = xlLineMarkers
         .SetSourceData Source:=ws.Range("A" & avgStart & ":D" & avgEnd)
         .HasTitle = True
         .ChartTitle.Text = "Internal vs Avg Dealer"
+        .Axes(xlCategory).TickLabels.Orientation = 45
     End With
-
-    ' Bar Chart (Dealer Beat Count)
-    Dim beatStart As Long, beatEnd As Long
-    beatStart = ws.Range("A:A").Find("Dealer Beat Count").Row + 1
-    beatEnd = ws.Cells(ws.Rows.Count, "A").End(xlUp).Row
     
+    ' --- Create Bar Chart (Dealer Beat Count) ---
     Set co = ws.ChartObjects.Add(Left:=ws.Range("I20").Left, Top:=ws.Range("I20").Top, Width:=400, Height:=250)
     With co.Chart
         .ChartType = xlColumnClustered
         .SetSourceData Source:=ws.Range("A" & beatStart & ":B" & beatEnd)
         .HasTitle = True
         .ChartTitle.Text = "Dealer Beat Count"
+        .Axes(xlCategory).TickLabels.Orientation = 45
     End With
 End Sub
-                                                        
