@@ -1,165 +1,112 @@
-import xlwings as xw
-import pandas as pd
-
-def create_repo_comparison_debug():
-    wb = xw.Book.caller()
-    ws = wb.sheets['RepoComp']
-    ws.clear()  # Clear sheet
-
-    # --- Load bot (dealer quotes) ---
-    bot_df = wb.sheets['bot'].range('A1').expand().options(pd.DataFrame, header=1).value
-    bot_df.columns = [c.lower() for c in bot_df.columns]  # ensure lower case
-
-    # --- Load internal repo markings ---
-    internal_df = wb.sheets['internal_repo_markings'].range('A1').expand().options(pd.DataFrame, header=1).value
-    internal_df.columns = [c.lower() for c in internal_df.columns]
-
-    # Convert dates
-    bot_df['date'] = pd.to_datetime(bot_df['date'])
-    internal_df['date'] = pd.to_datetime(internal_df['date'])
-
-    # Merge dealer quotes with internal financing
-    merged_df = pd.merge(bot_df, internal_df, on=['date', 'ticker'], how='inner', suffixes=('', '_internal'))
-
-    # Calculate difference and signal
-    merged_df['diff_bps'] = merged_df['implied_financing'] - merged_df['markings']
-    merged_df['signal'] = merged_df['diff_bps'].apply(lambda x: 'Cheap' if x < 0 else 'Expensive')
-
-    # Create summary: avg dealer vs internal
-    summary_df = merged_df.groupby(['date', 'ticker'], as_index=False).agg({
-        'implied_financing': 'mean',
-        'markings': 'first'
-    })
-    summary_df.rename(columns={'implied_financing': 'avg_dealer', 'markings': 'internal'}, inplace=True)
-
-    # Dealer beat count (count of quotes cheaper than internal)
-    beat_count_df = merged_df.groupby('ticker').apply(
-        lambda x: (x['implied_financing'] < x['markings']).sum()
-    ).reset_index(name='days_cheaper')
-
-    # --- Write results to RepoComp ---
-    ws.range('A1').value = "DEBUG: Merged Data"
-    ws.range('A2').value = merged_df
-
-    start_row = merged_df.shape[0] + 4
-    ws.range(f"A{start_row}").value = "DEBUG: Avg Dealer vs Internal"
-    ws.range(f"A{start_row + 1}").value = summary_df
-
-    start_row2 = start_row + summary_df.shape[0] + 4
-    ws.range(f"A{start_row2}").value = "DEBUG: Dealer Beat Count"
-    ws.range(f"A{start_row2 + 1}").value = beat_count_df
-
-    print("Merged DF:\n", merged_df.head())
-    print("Summary DF:\n", summary_df.head())
-    print("Beat Count DF:\n", beat_count_df.head())
-
-import xlwings as xw
-import pandas as pd
-
-def prepare_repo_visuals():
-    wb = xw.Book.caller()
-    ws = wb.sheets['RepoComp']
-    ws.clear()
-
-    # Load your data
-    df = wb.sheets['bot'].range('A1').expand().options(pd.DataFrame, header=1).value
-    df.columns = [c.lower() for c in df.columns]
-
-    # Heatmap data (pivot)
-    heatmap_df = df.pivot_table(
-        index=['date', 'ticker'],
-        columns='room_name',
-        values='implied_financing',
-        aggfunc='mean'
-    ).reset_index()
-
-    # Add internal markings
-    markings_df = df[['date', 'ticker', 'markings']].drop_duplicates()
-    heatmap_df = pd.merge(heatmap_df, markings_df, on=['date', 'ticker'])
-
-    # Avg dealer vs internal
-    dealer_cols = [c for c in heatmap_df.columns if c not in ['date', 'ticker', 'markings']]
-    heatmap_df['avg_dealer'] = heatmap_df[dealer_cols].mean(axis=1)
-    linechart_df = heatmap_df[['date', 'ticker', 'markings', 'avg_dealer']]
-
-    # Dealer beat count
-    dealer_counts = {
-        dealer: (df[df['room_name'] == dealer]['implied_financing'] < df[df['room_name'] == dealer]['markings']).sum()
-        for dealer in df['room_name'].unique()
-    }
-    dealer_count_df = pd.DataFrame(list(dealer_counts.items()), columns=['Dealer', 'Days Cheaper'])
-
-    # Write to RepoComp
-    ws.range('A1').value = "Heatmap Data"
-    ws.range('A2').value = heatmap_df
-
-    start_row = heatmap_df.shape[0] + 4
-    ws.range(f"A{start_row}").value = "Internal vs Avg Dealer"
-    ws.range(f"A{start_row + 1}").value = linechart_df
-
-    start_row2 = start_row + linechart_df.shape[0] + 4
-    ws.range(f"A{start_row2}").value = "Dealer Beat Count"
-    ws.range(f"A{start_row2 + 1}").value = dealer_count_df
-
-
-
-
 Option Explicit
 
-Sub RefreshRepoComp()
-    ' Run Python to prepare tables
-    Application.Run "xlwings.RunPython", "import dashboard_calc; dashboard_calc.prepare_repo_visuals()"
+'=============================
+' Run Python and Get Repo Data
+'=============================
+Function RunPythonRepoComparison() As Variant
+    Dim wb As Workbook
+    Dim ws As Worksheet
+    Dim tempRange As Range
     
-    ' Add charts and heatmap formatting
-    CreateRepoChartsAndHeatmap
-End Sub
+    Set wb = ThisWorkbook
+    Set ws = wb.Sheets("RepoComp")
+    
+    ' Clear temporary range
+    Set tempRange = ws.Range("A1")
+    tempRange.Resize(500, 7).Clear
+    
+    ' Call Python function
+    Application.Run "xlwings.RunPython", _
+        "import dashboard_calc;" & _
+        "dashboard_calc.create_repo_comparison()"
+    
+    ' Load Python output into VBA
+    RunPythonRepoComparison = tempRange.CurrentRegion.Value
+    
+    ' Clear temporary range (optional)
+    tempRange.Resize(500, 7).Clear
+End Function
 
-Sub CreateRepoChartsAndHeatmap()
+
+'=============================
+' Draw Repo Charts
+'=============================
+Sub DrawRepoCharts(data As Variant)
     Dim ws As Worksheet
     Set ws = Sheets("RepoComp")
     
     Dim co As ChartObject
-    Dim avgStart As Long, avgEnd As Long
-    Dim beatStart As Long, beatEnd As Long
+    Dim n As Long, i As Long
+    Dim ticker As String, signal As String
+    Dim cheapCount As Object, expensiveCount As Object
+    Set cheapCount = CreateObject("Scripting.Dictionary")
+    Set expensiveCount = CreateObject("Scripting.Dictionary")
     
     ' Clear old charts
     For Each co In ws.ChartObjects
         co.Delete
     Next co
-
-    ' --- Detect sections ---
-    avgStart = ws.Range("A:A").Find("Internal vs Avg Dealer", LookAt:=xlWhole).Row + 1
-    avgEnd = ws.Range("A:A").Find("Dealer Beat Count", LookAt:=xlWhole).Row - 2
-    beatStart = ws.Range("A:A").Find("Dealer Beat Count", LookAt:=xlWhole).Row + 1
-    beatEnd = ws.Cells(ws.Rows.Count, "A").End(xlUp).Row
-
-    ' --- Line Chart ---
-    Set co = ws.ChartObjects.Add(Left:=ws.Range("I2").Left, Top:=ws.Range("I2").Top, Width:=400, Height:=250)
-    With co.Chart
-        .ChartType = xlLineMarkers
-        .SetSourceData Source:=ws.Range("A" & avgStart & ":D" & avgEnd)
-        .HasTitle = True
-        .ChartTitle.Text = "Internal vs Avg Dealer"
-    End With
-
-    ' --- Bar Chart ---
-    Set co = ws.ChartObjects.Add(Left:=ws.Range("I20").Left, Top:=ws.Range("I20").Top, Width:=400, Height:=250)
-    With co.Chart
-        .ChartType = xlColumnClustered
-        .SetSourceData Source:=ws.Range("A" & beatStart & ":B" & beatEnd)
-        .HasTitle = True
-        .ChartTitle.Text = "Dealer Beat Count"
-    End With
-
-    ' --- Conditional Formatting (Heatmap) ---
-    Dim heatmapEnd As Long
-    heatmapEnd = ws.Range("A:A").Find("Internal vs Avg Dealer", LookAt:=xlWhole).Row - 2
-    Dim dealerCols As Range
-    Set dealerCols = ws.Range("C2:F" & heatmapEnd) ' adjust if more dealer columns
     
-    dealerCols.FormatConditions.Delete
-    dealerCols.FormatConditions.Add xlExpression, Formula1:="=C2<$B2"
-    dealerCols.FormatConditions(1).Interior.Color = RGB(144, 238, 144) ' Green
-    dealerCols.FormatConditions.Add xlExpression, Formula1:="=C2>$B2"
-    dealerCols.FormatConditions(2).Interior.Color = RGB(255, 182, 193) ' Red
+    ' Find number of rows in the returned data
+    n = UBound(data, 1)
+    
+    ' Count Cheap vs Expensive by ticker
+    For i = 2 To n
+        ticker = data(i, 3) ' ticker column
+        signal = data(i, 7) ' signal column
+        If signal = "Cheap" Then
+            cheapCount(ticker) = cheapCount(ticker) + 1
+        ElseIf signal = "Expensive" Then
+            expensiveCount(ticker) = expensiveCount(ticker) + 1
+        End If
+    Next i
+    
+    ' Write count summary for chart
+    ws.Range("Q1:S1").Value = Array("Ticker", "Cheap", "Expensive")
+    i = 2
+    Dim key As Variant
+    For Each key In cheapCount.Keys
+        ws.Cells(i, "Q").Value = key
+        ws.Cells(i, "R").Value = cheapCount(key)
+        ws.Cells(i, "S").Value = expensiveCount(key)
+        i = i + 1
+    Next key
+    
+    ' Create stacked bar chart for Cheap vs Expensive
+    Set co = ws.ChartObjects.Add(Left:=ws.Range("Q1").Left, _
+                                 Top:=ws.Range("Q1").Top + 150, _
+                                 Width:=400, Height:=250)
+    With co.Chart
+        .ChartType = xlColumnStacked
+        .SetSourceData Source:=ws.Range("Q1:S" & i - 1)
+        .ChartTitle.Text = "Cheap vs Expensive Quotes per Ticker"
+    End With
+    
+    ' Apply Conditional Formatting for Signal Column
+    ws.Range("G2:G" & n).FormatConditions.Delete
+    With ws.Range("G2:G" & n).FormatConditions.Add(Type:=xlTextString, String:="Cheap", TextOperator:=xlContains)
+        .Interior.Color = RGB(144, 238, 144) ' Light green
+    End With
+    With ws.Range("G2:G" & n).FormatConditions.Add(Type:=xlTextString, String:="Expensive", TextOperator:=xlContains)
+        .Interior.Color = RGB(255, 160, 122) ' Light red
+    End With
+End Sub
+
+
+'=============================
+' Refresh Repo Dashboard
+'=============================
+Sub RefreshRepoDashboard()
+    Dim result As Variant
+    
+    ' Get data from Python
+    result = RunPythonRepoComparison()
+    
+    If IsEmpty(result) Then
+        MsgBox "No Repo Data Found!", vbExclamation
+        Exit Sub
+    End If
+    
+    ' Draw charts
+    DrawRepoCharts result
 End Sub
