@@ -1,67 +1,45 @@
-Option Explicit
-
-'=============================
-' Run Python and Get Repo Data
-'=============================
-Function RunPythonRepoComparison() As Variant
-    Dim wb As Workbook
-    Dim ws As Worksheet
-    Dim tempRange As Range
-    
-    Set wb = ThisWorkbook
-    Set ws = wb.Sheets("RepoComp")
-    
-    ' Clear temporary range
-    Set tempRange = ws.Range("A1")
-    tempRange.Resize(500, 7).Clear
-    
-    ' Call Python function
-    Application.Run "xlwings.RunPython", _
-        "import dashboard_calc;" & _
-        "dashboard_calc.create_repo_comparison()"
-    
-    ' Load Python output into VBA
-    RunPythonRepoComparison = tempRange.CurrentRegion.Value
-    
-    ' Clear temporary range (optional)
-    tempRange.Resize(500, 7).Clear
-End Function
-
-
-'=============================
-' Draw Repo Charts
-'=============================
 Sub DrawRepoCharts(data As Variant)
     Dim ws As Worksheet
     Set ws = Sheets("RepoComp")
-    
     Dim co As ChartObject
+    
     Dim n As Long, i As Long
     Dim ticker As String, signal As String
     Dim cheapCount As Object, expensiveCount As Object
     Set cheapCount = CreateObject("Scripting.Dictionary")
     Set expensiveCount = CreateObject("Scripting.Dictionary")
     
-    ' Clear old charts
+    ' Remove previous charts only (keep titles and other content)
     For Each co In ws.ChartObjects
         co.Delete
     Next co
     
-    ' Find number of rows in the returned data
-    n = UBound(data, 1)
+    ' Clear only summary area
+    ws.Range("Q:S").Clear
     
-    ' Count Cheap vs Expensive by ticker
+    ' Determine number of rows
+    On Error GoTo ArrayError
+    n = UBound(data, 1)
+    On Error GoTo 0
+    
+    ' Count Cheap vs Expensive per Ticker
     For i = 2 To n
-        ticker = data(i, 3) ' ticker column
-        signal = data(i, 7) ' signal column
-        If signal = "Cheap" Then
-            cheapCount(ticker) = cheapCount(ticker) + 1
-        ElseIf signal = "Expensive" Then
-            expensiveCount(ticker) = expensiveCount(ticker) + 1
+        ticker = CStr(data(i, 3))   ' Column 3 = Ticker
+        signal = LCase(CStr(data(i, 7))) ' Column 7 = Signal
+        If ticker <> "" Then
+            If Not cheapCount.exists(ticker) Then
+                cheapCount.Add ticker, 0
+                expensiveCount.Add ticker, 0
+            End If
+            If signal = "cheap" Then
+                cheapCount(ticker) = cheapCount(ticker) + 1
+            ElseIf signal = "expensive" Then
+                expensiveCount(ticker) = expensiveCount(ticker) + 1
+            End If
         End If
     Next i
     
-    ' Write count summary for chart
+    ' Write summary to Q:S
     ws.Range("Q1:S1").Value = Array("Ticker", "Cheap", "Expensive")
     i = 2
     Dim key As Variant
@@ -72,41 +50,27 @@ Sub DrawRepoCharts(data As Variant)
         i = i + 1
     Next key
     
-    ' Create stacked bar chart for Cheap vs Expensive
+    ' Create stacked bar chart
     Set co = ws.ChartObjects.Add(Left:=ws.Range("Q1").Left, _
                                  Top:=ws.Range("Q1").Top + 150, _
                                  Width:=400, Height:=250)
     With co.Chart
         .ChartType = xlColumnStacked
         .SetSourceData Source:=ws.Range("Q1:S" & i - 1)
+        .HasTitle = True
         .ChartTitle.Text = "Cheap vs Expensive Quotes per Ticker"
     End With
     
-    ' Apply Conditional Formatting for Signal Column
+    ' Add conditional formatting for Signal column (G)
     ws.Range("G2:G" & n).FormatConditions.Delete
     With ws.Range("G2:G" & n).FormatConditions.Add(Type:=xlTextString, String:="Cheap", TextOperator:=xlContains)
-        .Interior.Color = RGB(144, 238, 144) ' Light green
+        .Interior.Color = RGB(144, 238, 144)
     End With
     With ws.Range("G2:G" & n).FormatConditions.Add(Type:=xlTextString, String:="Expensive", TextOperator:=xlContains)
-        .Interior.Color = RGB(255, 160, 122) ' Light red
+        .Interior.Color = RGB(255, 160, 122)
     End With
-End Sub
-
-
-'=============================
-' Refresh Repo Dashboard
-'=============================
-Sub RefreshRepoDashboard()
-    Dim result As Variant
+    Exit Sub
     
-    ' Get data from Python
-    result = RunPythonRepoComparison()
-    
-    If IsEmpty(result) Then
-        MsgBox "No Repo Data Found!", vbExclamation
-        Exit Sub
-    End If
-    
-    ' Draw charts
-    DrawRepoCharts result
+ArrayError:
+    MsgBox "Invalid data returned by Python for charting.", vbCritical
 End Sub
