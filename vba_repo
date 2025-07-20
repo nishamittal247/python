@@ -1,0 +1,111 @@
+import xlwings as xw
+import pandas as pd
+
+def create_repo_comparison():
+    wb = xw.Book.caller()
+    
+    # Load data
+    bot_df = wb.sheets['bot'].range('A1').expand().options(pd.DataFrame, header=1).value
+    internal_df = wb.sheets['internal_repo_markings'].range('A1').expand().options(pd.DataFrame, header=1).value
+    
+    # Ensure date columns are datetime
+    bot_df['Date'] = pd.to_datetime(bot_df['Date'])
+    internal_df['Date'] = pd.to_datetime(internal_df['Date'])
+    
+    # Merge internal financing with dealer quotes
+    merged_df = pd.merge(bot_df, internal_df, on=['Date', 'Ticker'], suffixes=('', '_Internal'))
+    
+    # Create signal column
+    merged_df['Signal'] = merged_df['Implied Financing'] < merged_df['Internal Financing']
+    
+    # Pivot to Heatmap Table
+    heatmap_df = merged_df.pivot_table(
+        index=['Date', 'Ticker'],
+        columns='Dealer',
+        values='Implied Financing',
+        aggfunc='mean'
+    ).reset_index()
+    heatmap_df = pd.merge(heatmap_df, internal_df, on=['Date', 'Ticker'])
+    
+    # Average Dealer Financing vs Internal
+    dealer_cols = [c for c in heatmap_df.columns if c not in ['Date', 'Ticker', 'Internal Financing']]
+    heatmap_df['Avg Dealer'] = heatmap_df[dealer_cols].mean(axis=1)
+    linechart_df = heatmap_df[['Date', 'Ticker', 'Internal Financing', 'Avg Dealer']]
+
+    # Dealer Beat Count
+    beat_count = {}
+    for dealer in dealer_cols:
+        beat_count[dealer] = (heatmap_df[dealer] < heatmap_df['Internal Financing']).sum()
+    dealer_count_df = pd.DataFrame(list(beat_count.items()), columns=['Dealer', 'Days Cheaper'])
+
+    # Write to RepoComp
+    ws = wb.sheets['RepoComp']
+    ws.clear()  # Clear sheet
+
+    ws.range('A1').value = 'Heatmap: Dealer Quotes vs Internal'
+    ws.range('A2').value = heatmap_df
+
+    start_row = heatmap_df.shape[0] + 4
+    ws.range(f'A{start_row}').value = 'Internal vs Avg Dealer (Line Chart Data)'
+    ws.range(f'A{start_row + 1}').value = linechart_df
+
+    start_row2 = start_row + linechart_df.shape[0] + 4
+    ws.range(f'A{start_row2}').value = 'Dealer Beat Count'
+    ws.range(f'A{start_row2 + 1}').value = dealer_count_df
+
+
+
+
+
+
+
+Option Explicit
+
+Sub RefreshRepoComparison()
+    ' Run Python script
+    Application.Run "xlwings.RunPython", "import dashboard_calc; dashboard_calc.create_repo_comparison()"
+    
+    ' After Python pushes data, build charts
+    CreateRepoCharts
+End Sub
+
+Sub CreateRepoCharts()
+    Dim ws As Worksheet
+    Set ws = Sheets("RepoComp")
+    Dim lastRow As Long
+    
+    ' Clear existing charts
+    Dim co As ChartObject
+    For Each co In ws.ChartObjects
+        co.Delete
+    Next co
+
+    ' Heatmap: (We apply conditional formatting manually here)
+    ' Line Chart
+    lastRow = ws.Cells(ws.Rows.Count, "A").End(xlUp).Row
+    Dim avgStart As Long, avgEnd As Long
+    avgStart = ws.Range("A:A").Find("Internal vs Avg Dealer (Line Chart Data)").Row + 1
+    avgEnd = ws.Range("A:A").Find("Dealer Beat Count").Row - 2
+    
+    Set co = ws.ChartObjects.Add(Left:=ws.Range("I2").Left, Top:=ws.Range("I2").Top, Width:=400, Height:=250)
+    With co.Chart
+        .ChartType = xlLineMarkers
+        .SetSourceData Source:=ws.Range("A" & avgStart & ":D" & avgEnd)
+        .HasTitle = True
+        .ChartTitle.Text = "Internal vs Avg Dealer"
+    End With
+
+    ' Bar Chart (Dealer Beat Count)
+    Dim beatStart As Long, beatEnd As Long
+    beatStart = ws.Range("A:A").Find("Dealer Beat Count").Row + 1
+    beatEnd = ws.Cells(ws.Rows.Count, "A").End(xlUp).Row
+    
+    Set co = ws.ChartObjects.Add(Left:=ws.Range("I20").Left, Top:=ws.Range("I20").Top, Width:=400, Height:=250)
+    With co.Chart
+        .ChartType = xlColumnClustered
+        .SetSourceData Source:=ws.Range("A" & beatStart & ":B" & beatEnd)
+        .HasTitle = True
+        .ChartTitle.Text = "Dealer Beat Count"
+    End With
+End Sub
+                                                        
