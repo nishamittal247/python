@@ -55,76 +55,50 @@ def create_repo_comparison_debug():
 
 
 
-Option Explicit
+import xlwings as xw
+import pandas as pd
 
-Sub RefreshRepoComparison()
-    ' Run Python script
-    Application.Run "xlwings.RunPython", "import dashboard_calc; dashboard_calc.create_repo_comparison()"
-    
-    ' After Python pushes data, build charts
-    CreateRepoCharts
-End Sub
-Sub CreateRepoCharts()
-    Dim ws As Worksheet
-    Set ws = Sheets("RepoComp")
-    
-    Dim co As ChartObject
-    Dim lastRow As Long
-    Dim avgStart As Long, avgEnd As Long
-    Dim beatStart As Long, beatEnd As Long
-    
-    ' --- Clear old charts ---
-    For Each co In ws.ChartObjects
-        co.Delete
-    Next co
-    
-    ' --- Detect Heatmap Table ---
-    ' The first table starts at A2
-    Dim firstTableEnd As Long
-    firstTableEnd = ws.Cells(ws.Rows.Count, "A").End(xlUp).Row
-    If firstTableEnd < 5 Then
-        MsgBox "No data found in RepoComp.", vbExclamation
-        Exit Sub
-    End If
-    
-    ' Locate the start of the 2nd table (Internal vs Avg Dealer)
-    ' It is just below the first table + 2 rows
-    avgStart = firstTableEnd + 2
-    ' Detect last row of the 2nd table
-    avgEnd = ws.Cells(ws.Rows.Count, "A").End(xlUp).Row
-    Dim i As Long
-    For i = avgStart To avgEnd
-        If ws.Cells(i, 1).Value = "" Then
-            avgEnd = i - 1
-            Exit For
-        End If
-    Next i
-    
-    ' --- Detect Dealer Beat Count Table ---
-    beatStart = avgEnd + 3
-    beatEnd = beatStart
-    Do While ws.Cells(beatEnd, 1).Value <> "" Or ws.Cells(beatEnd, 2).Value <> ""
-        beatEnd = beatEnd + 1
-    Loop
-    beatEnd = beatEnd - 1
-    
-    ' --- Create Line Chart (Internal vs Avg Dealer) ---
-    Set co = ws.ChartObjects.Add(Left:=ws.Range("I2").Left, Top:=ws.Range("I2").Top, Width:=400, Height:=250)
-    With co.Chart
-        .ChartType = xlLineMarkers
-        .SetSourceData Source:=ws.Range("A" & avgStart & ":D" & avgEnd)
-        .HasTitle = True
-        .ChartTitle.Text = "Internal vs Avg Dealer"
-        .Axes(xlCategory).TickLabels.Orientation = 45
-    End With
-    
-    ' --- Create Bar Chart (Dealer Beat Count) ---
-    Set co = ws.ChartObjects.Add(Left:=ws.Range("I20").Left, Top:=ws.Range("I20").Top, Width:=400, Height:=250)
-    With co.Chart
-        .ChartType = xlColumnClustered
-        .SetSourceData Source:=ws.Range("A" & beatStart & ":B" & beatEnd)
-        .HasTitle = True
-        .ChartTitle.Text = "Dealer Beat Count"
-        .Axes(xlCategory).TickLabels.Orientation = 45
-    End With
-End Sub
+def prepare_repo_visuals():
+    wb = xw.Book.caller()
+    ws = wb.sheets['RepoComp']
+    ws.clear()
+
+    # Load your data
+    df = wb.sheets['bot'].range('A1').expand().options(pd.DataFrame, header=1).value
+    df.columns = [c.lower() for c in df.columns]
+
+    # Heatmap data (pivot)
+    heatmap_df = df.pivot_table(
+        index=['date', 'ticker'],
+        columns='room_name',
+        values='implied_financing',
+        aggfunc='mean'
+    ).reset_index()
+
+    # Add internal markings
+    markings_df = df[['date', 'ticker', 'markings']].drop_duplicates()
+    heatmap_df = pd.merge(heatmap_df, markings_df, on=['date', 'ticker'])
+
+    # Avg dealer vs internal
+    dealer_cols = [c for c in heatmap_df.columns if c not in ['date', 'ticker', 'markings']]
+    heatmap_df['avg_dealer'] = heatmap_df[dealer_cols].mean(axis=1)
+    linechart_df = heatmap_df[['date', 'ticker', 'markings', 'avg_dealer']]
+
+    # Dealer beat count
+    dealer_counts = {
+        dealer: (df[df['room_name'] == dealer]['implied_financing'] < df[df['room_name'] == dealer]['markings']).sum()
+        for dealer in df['room_name'].unique()
+    }
+    dealer_count_df = pd.DataFrame(list(dealer_counts.items()), columns=['Dealer', 'Days Cheaper'])
+
+    # Write to RepoComp
+    ws.range('A1').value = "Heatmap Data"
+    ws.range('A2').value = heatmap_df
+
+    start_row = heatmap_df.shape[0] + 4
+    ws.range(f"A{start_row}").value = "Internal vs Avg Dealer"
+    ws.range(f"A{start_row + 1}").value = linechart_df
+
+    start_row2 = start_row + linechart_df.shape[0] + 4
+    ws.range(f"A{start_row2}").value = "Dealer Beat Count"
+    ws.range(f"A{start_row2 + 1}").value = dealer_count_df
