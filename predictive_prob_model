@@ -1,4 +1,5 @@
 import pandas as pd
+import matplotlib.pyplot as plt
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler, OneHotEncoder
 from sklearn.compose import ColumnTransformer
@@ -7,37 +8,38 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.calibration import CalibratedClassifierCV
 from sklearn.metrics import accuracy_score, classification_report, roc_auc_score
 
-# -------------------------------
-# 1. Load and preprocess data
-# -------------------------------
-data = pd.read_excel("C:/Users/h71125/Dashboard_project/data_sample.xlsx", sheet_name=0)
+# Load and preprocess
+data = pd.read_excel("C:/Users/h71125/Dashboard_project/data_sample.xlsx")
 data = data.fillna(0)
 
-# Define target variable
+# Binary target: 1 if traded > 0
 data['traded_flag'] = (data['traded'] > 0).astype(int)
 
-# Create dealer-ticker interaction feature
+# Composite interaction feature
 data['dealer_ticker_combo'] = data['room_name'].astype(str) + "_" + data['ticker'].astype(str)
 
-# Create historical trade count feature
-trade_counts = data.groupby(['room_name', 'ticker'])['traded_flag'].sum().reset_index(name='dealer_ticker_trade_count')
+# Historical trade count
+trade_counts = (
+    data.groupby(['room_name', 'ticker'])['traded_flag']
+    .sum()
+    .reset_index(name='dealer_ticker_trade_count')
+)
 data = data.merge(trade_counts, on=['room_name', 'ticker'], how='left')
 
-# Final feature set
-X = data[['room_name', 'ticker', 'implied_financing_traded', 'dealer_ticker_combo', 'dealer_ticker_trade_count']]
+# Make sure numeric columns are correct type
+data['implied_financing_traded'] = pd.to_numeric(data['implied_financing_traded'], errors='coerce')
+data['dealer_ticker_trade_count'] = pd.to_numeric(data['dealer_ticker_trade_count'], errors='coerce')
+
+# Define feature set
+features = ['room_name', 'ticker', 'implied_financing_traded', 'dealer_ticker_combo', 'dealer_ticker_trade_count']
+X = data[features]
 y = data['traded_flag']
 
-# -------------------------------
-# 2. Train-test split
-# -------------------------------
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-
-# -------------------------------
-# 3. Define preprocessing
-# -------------------------------
+# Column types
 categorical_features = ['room_name', 'ticker', 'dealer_ticker_combo']
 numerical_features = ['implied_financing_traded', 'dealer_ticker_trade_count']
 
+# ColumnTransformer
 preprocessor = ColumnTransformer(
     transformers=[
         ('num', StandardScaler(), numerical_features),
@@ -45,65 +47,73 @@ preprocessor = ColumnTransformer(
     ]
 )
 
-# -------------------------------
-# 4. Model with calibration
-# -------------------------------
+# Calibrated model
 rf_model = RandomForestClassifier(n_estimators=200, max_depth=None, random_state=42)
-calibrated_rf = CalibratedClassifierCV(base_estimator=rf_model, method='isotonic', cv=3)
+calibrated_rf = CalibratedClassifierCV(estimator=rf_model, method='isotonic', cv=3)
 
+# Pipeline
 model = Pipeline(steps=[
     ('preprocessor', preprocessor),
     ('classifier', calibrated_rf)
 ])
 
-# -------------------------------
-# 5. Train model
-# -------------------------------
-model.fit(X_train, y_train)
-
-# -------------------------------
-# 6. Evaluate model
-# -------------------------------
-y_pred = model.predict(X_test)
-y_pred_proba = model.predict_proba(X_test)[:, 1]
-
-print("Accuracy:", accuracy_score(y_test, y_pred))
-print("ROC AUC Score:", roc_auc_score(y_test, y_pred_proba))
-print("Classification Report:\n", classification_report(y_test, y_pred))
-
-# -------------------------------
-# 7. Predict function
-# -------------------------------
-# Store training pairs for unseen combo check
+# Train-test split
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 training_pairs = set(zip(X_train['room_name'], X_train['ticker']))
 
+# Fit model
+model.fit(X_train, y_train)
+
+# Evaluate
+y_pred = model.predict(X_test)
+y_proba = model.predict_proba(X_test)[:, 1]
+print("Accuracy:", accuracy_score(y_test, y_pred))
+print("ROC AUC:", roc_auc_score(y_test, y_proba))
+print("Classification Report:\n", classification_report(y_test, y_pred))
+
+# Predict function
 def predict_trade_probability(room_name, ticker, financing_level):
-    dealer_ticker_combo = f"{room_name}_{ticker}"
-    # Historical trade count (0 if unseen)
-    trade_count = trade_counts.loc[
+    combo = f"{room_name}_{ticker}"
+    count = trade_counts.loc[
         (trade_counts['room_name'] == room_name) & (trade_counts['ticker'] == ticker),
         'dealer_ticker_trade_count'
     ]
-    trade_count = trade_count.values[0] if len(trade_count) > 0 else 0
+    count = count.values[0] if len(count) > 0 else 0
 
     input_data = pd.DataFrame([{
         'room_name': room_name,
         'ticker': ticker,
         'implied_financing_traded': financing_level,
-        'dealer_ticker_combo': dealer_ticker_combo,
-        'dealer_ticker_trade_count': trade_count
+        'dealer_ticker_combo': combo,
+        'dealer_ticker_trade_count': count
     }])
 
     prob = model.predict_proba(input_data)[0, 1]
 
-    # Clip probability for unseen dealer-ticker combos
+    # Clip for unseen dealer-ticker combos
     if (room_name, ticker) not in training_pairs:
         prob = min(prob, 0.2)
 
     return prob
 
-# -------------------------------
-# 8. Example usage
-# -------------------------------
-result = predict_trade_probability('Magen', 'AAPL', 44)
-print(f"Predicted trade probability for Magen - AAPL at financing 44: {result:.3f}")
+# Plot function
+def plot_trade_probability(room_name, ticker, financing_range=range(20, 60)):
+    results = []
+    for f in financing_range:
+        p = predict_trade_probability(room_name, ticker, f)
+        results.append((f, p))
+    df_plot = pd.DataFrame(results, columns=['implied_financing', 'trade_probability'])
+
+    plt.figure(figsize=(8, 4))
+    plt.plot(df_plot['implied_financing'], df_plot['trade_probability'], marker='o')
+    plt.title(f"Predicted P(Trade) for {room_name} - {ticker}")
+    plt.xlabel("Implied Financing")
+    plt.ylabel("Probability of Trade")
+    plt.grid(True)
+    plt.show()
+
+# Example usage
+print("Example prediction:")
+print(predict_trade_probability("Magen", "AAPL", 44))
+
+plot_trade_probability("Magen", "AAPL", range(20, 60))
