@@ -99,31 +99,41 @@ def predict_trade_probability(model, trade_counts, training_pairs, dealer, ticke
 # ===================================================
 def forecast_and_predict(data, model, trade_counts, training_pairs, dealer, ticker, steps=10, order=(2,1,2)):
     """
-    Forecast financing for a ticker and predict trade probability for each forecasted level.
-    Plots both historical financing and probability curve.
+    Forecast financing (VWAP across dealers) and compute trade probability.
     """
-    # Sort data
-    ticker_data = data[data['ticker'] == ticker].sort_values('date')
-    financing_series = ticker_data.set_index('date')['implied_financing_traded']
+    # Compute VW financing per date for the ticker
+    if 'traded' in data.columns and data['traded'].sum() > 0:
+        ticker_data = data[data['ticker'] == ticker].groupby('date').apply(
+            lambda g: (g['implied_financing_traded'] * g['traded']).sum() / g['traded'].sum()
+        ).reset_index(name='vw_implied_financing')
+    else:
+        ticker_data = data[data['ticker'] == ticker].groupby('date')['implied_financing_traded'].mean().reset_index(name='vw_implied_financing')
     
-    # ARIMA forecasting
-    model_arima = ARIMA(financing_series, order=order)
-    model_fit = model_arima.fit()
-    forecasted_financing = model_fit.forecast(steps=steps)
+    ticker_data = ticker_data.sort_values('date')
+    financing_series = ticker_data.set_index('date')['vw_implied_financing']
     
+    # ARIMA Forecast
+    if len(financing_series) < 3:
+        print("⚠ Not enough data points for ARIMA forecasting. Showing average financing instead.")
+        forecasted_financing = pd.Series([financing_series.iloc[-1]] * steps)
+    else:
+        model_arima = ARIMA(financing_series, order=order)
+        model_fit = model_arima.fit()
+        forecasted_financing = model_fit.forecast(steps=steps)
+
     # Plot Historical + Forecasted Financing
     plt.figure(figsize=(10, 4))
-    plt.plot(financing_series.index, financing_series, label="Historical Financing", linewidth=2)
+    plt.plot(financing_series.index, financing_series, label="Historical VW Financing", linewidth=2)
     forecast_dates = pd.date_range(financing_series.index[-1], periods=steps+1, freq="D")[1:]
     plt.plot(forecast_dates, forecasted_financing, label="Forecasted Financing", linestyle="--", marker='o')
-    plt.title(f"Historical & Forecasted Financing for {ticker}")
+    plt.title(f"VW Financing for {ticker} (Historical & Forecasted)")
     plt.xlabel("Date")
-    plt.ylabel("Implied Financing Level")
+    plt.ylabel("VW Implied Financing")
     plt.legend()
     plt.grid(True)
     plt.show()
-    
-    # Predict probabilities
+
+    # Predict Trade Probability
     results = []
     for f in forecasted_financing:
         p = predict_trade_probability(model, trade_counts, training_pairs, dealer, ticker, f)
@@ -131,16 +141,17 @@ def forecast_and_predict(data, model, trade_counts, training_pairs, dealer, tick
     
     result_df = pd.DataFrame(results, columns=['Forecasted_Financing', 'Predicted_Trade_Probability'])
     
-    # Plot Trade Probability vs Financing
+    # Plot Probability vs Financing
     plt.figure(figsize=(8, 4))
     plt.plot(result_df['Forecasted_Financing'], result_df['Predicted_Trade_Probability'], marker='o', color="purple")
-    plt.title(f"Predicted Trade Probability vs Financing for {dealer} - {ticker}")
-    plt.xlabel("Forecasted Financing")
+    plt.title(f"Predicted Trade Probability vs VW Financing for {dealer} - {ticker}")
+    plt.xlabel("Forecasted VW Financing")
     plt.ylabel("Probability of Trade")
     plt.grid(True)
     plt.show()
-    
+
     return result_df
+
 
 # ===================================================
 # 4. EXAMPLE USAGE
