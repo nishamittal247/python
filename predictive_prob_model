@@ -7,113 +7,145 @@ from sklearn.pipeline import Pipeline
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.calibration import CalibratedClassifierCV
 from sklearn.metrics import accuracy_score, classification_report, roc_auc_score
+from statsmodels.tsa.arima.model import ARIMA
 
-# Load and preprocess
-data = pd.read_excel("C:/Users/h71125/Dashboard_project/data_sample.xlsx")
-data = data.fillna(0)
-
-# Binary target: 1 if traded > 0
-data['traded_flag'] = (data['traded'] > 0).astype(int)
-
-# Composite interaction feature
-data['dealer_ticker_combo'] = data['room_name'].astype(str) + "_" + data['ticker'].astype(str)
-
-# Historical trade count
-trade_counts = (
-    data.groupby(['room_name', 'ticker'])['traded_flag']
-    .sum()
-    .reset_index(name='dealer_ticker_trade_count')
-)
-data = data.merge(trade_counts, on=['room_name', 'ticker'], how='left')
-
-# Make sure numeric columns are correct type
-data['implied_financing_traded'] = pd.to_numeric(data['implied_financing_traded'], errors='coerce')
-data['dealer_ticker_trade_count'] = pd.to_numeric(data['dealer_ticker_trade_count'], errors='coerce')
-
-# Define feature set
-features = ['room_name', 'ticker', 'implied_financing_traded', 'dealer_ticker_combo', 'dealer_ticker_trade_count']
-X = data[features]
-y = data['traded_flag']
-
-# Column types
-categorical_features = ['room_name', 'ticker', 'dealer_ticker_combo']
-numerical_features = ['implied_financing_traded', 'dealer_ticker_trade_count']
-
-# ColumnTransformer
-preprocessor = ColumnTransformer(
-    transformers=[
+# ===================================================
+# 1. TRAIN RANDOM FOREST MODEL
+# ===================================================
+def train_trade_probability_model(data):
+    """
+    Train RandomForest classifier on trade data.
+    """
+    # Binary target
+    data['traded_flag'] = (data['traded'] > 0).astype(int)
+    
+    # Dealer-ticker combo
+    data['dealer_ticker_combo'] = data['room_name'].astype(str) + "_" + data['ticker'].astype(str)
+    
+    # Historical trade counts
+    trade_counts = (
+        data.groupby(['room_name', 'ticker'])['traded_flag']
+        .sum()
+        .reset_index(name='dealer_ticker_trade_count')
+    )
+    data = data.merge(trade_counts, on=['room_name', 'ticker'], how='left')
+    
+    # Features & target
+    features = ['room_name', 'ticker', 'implied_financing_traded', 'dealer_ticker_combo', 'dealer_ticker_trade_count']
+    X = data[features].copy()
+    y = data['traded_flag']
+    
+    # Ensure correct types
+    for col in ['room_name', 'ticker', 'dealer_ticker_combo']:
+        X[col] = X[col].astype(str)
+    for col in ['implied_financing_traded', 'dealer_ticker_trade_count']:
+        X[col] = pd.to_numeric(X[col], errors='coerce')
+    
+    # Train-test split
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+    training_pairs = set(zip(X_train['room_name'], X_train['ticker']))
+    
+    # Preprocessor
+    categorical_features = ['room_name', 'ticker', 'dealer_ticker_combo']
+    numerical_features = ['implied_financing_traded', 'dealer_ticker_trade_count']
+    preprocessor = ColumnTransformer([
         ('num', StandardScaler(), numerical_features),
         ('cat', OneHotEncoder(handle_unknown='ignore'), categorical_features)
-    ]
-)
+    ])
+    
+    # Model with calibration
+    rf_model = RandomForestClassifier(n_estimators=200, random_state=42)
+    calibrated_rf = CalibratedClassifierCV(estimator=rf_model, method='isotonic', cv=3)
+    model = Pipeline(steps=[('preprocessor', preprocessor), ('classifier', calibrated_rf)])
+    
+    # Fit model
+    model.fit(X_train, y_train)
+    
+    # Evaluate
+    y_pred = model.predict(X_test)
+    y_proba = model.predict_proba(X_test)[:, 1]
+    print("Accuracy:", accuracy_score(y_test, y_pred))
+    print("ROC AUC:", roc_auc_score(y_test, y_proba))
+    print("Classification Report:\n", classification_report(y_test, y_pred))
+    
+    return model, trade_counts, training_pairs
 
-# Calibrated model
-rf_model = RandomForestClassifier(n_estimators=200, max_depth=None, random_state=42)
-calibrated_rf = CalibratedClassifierCV(estimator=rf_model, method='isotonic', cv=3)
-
-# Pipeline
-model = Pipeline(steps=[
-    ('preprocessor', preprocessor),
-    ('classifier', calibrated_rf)
-])
-
-# Train-test split
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-training_pairs = set(zip(X_train['room_name'], X_train['ticker']))
-
-# Fit model
-model.fit(X_train, y_train)
-
-# Evaluate
-y_pred = model.predict(X_test)
-y_proba = model.predict_proba(X_test)[:, 1]
-print("Accuracy:", accuracy_score(y_test, y_pred))
-print("ROC AUC:", roc_auc_score(y_test, y_proba))
-print("Classification Report:\n", classification_report(y_test, y_pred))
-
-# Predict function
-def predict_trade_probability(room_name, ticker, financing_level):
-    combo = f"{room_name}_{ticker}"
-    count = trade_counts.loc[
-        (trade_counts['room_name'] == room_name) & (trade_counts['ticker'] == ticker),
+# ===================================================
+# 2. PREDICT TRADE PROBABILITY
+# ===================================================
+def predict_trade_probability(model, trade_counts, training_pairs, dealer, ticker, financing_level):
+    combo = f"{dealer}_{ticker}"
+    trade_count = trade_counts.loc[
+        (trade_counts['room_name'] == dealer) & (trade_counts['ticker'] == ticker),
         'dealer_ticker_trade_count'
     ]
-    count = count.values[0] if len(count) > 0 else 0
-
+    trade_count = trade_count.values[0] if len(trade_count) > 0 else 0
+    
     input_data = pd.DataFrame([{
-        'room_name': room_name,
+        'room_name': dealer,
         'ticker': ticker,
         'implied_financing_traded': financing_level,
         'dealer_ticker_combo': combo,
-        'dealer_ticker_trade_count': count
+        'dealer_ticker_trade_count': trade_count
     }])
-
+    
     prob = model.predict_proba(input_data)[0, 1]
-
-    # Clip for unseen dealer-ticker combos
-    if (room_name, ticker) not in training_pairs:
+    if (dealer, ticker) not in training_pairs:
         prob = min(prob, 0.2)
-
     return prob
 
-# Plot function
-def plot_trade_probability(room_name, ticker, financing_range=range(20, 60)):
+# ===================================================
+# 3. FORECAST + PREDICT PIPELINE
+# ===================================================
+def forecast_and_predict(data, model, trade_counts, training_pairs, dealer, ticker, steps=10, order=(2,1,2)):
+    """
+    Forecast financing for a ticker and predict trade probability for each forecasted level.
+    Plots both historical financing and probability curve.
+    """
+    # Sort data
+    ticker_data = data[data['ticker'] == ticker].sort_values('date')
+    financing_series = ticker_data.set_index('date')['implied_financing_traded']
+    
+    # ARIMA forecasting
+    model_arima = ARIMA(financing_series, order=order)
+    model_fit = model_arima.fit()
+    forecasted_financing = model_fit.forecast(steps=steps)
+    
+    # Plot Historical + Forecasted Financing
+    plt.figure(figsize=(10, 4))
+    plt.plot(financing_series.index, financing_series, label="Historical Financing", linewidth=2)
+    forecast_dates = pd.date_range(financing_series.index[-1], periods=steps+1, freq="D")[1:]
+    plt.plot(forecast_dates, forecasted_financing, label="Forecasted Financing", linestyle="--", marker='o')
+    plt.title(f"Historical & Forecasted Financing for {ticker}")
+    plt.xlabel("Date")
+    plt.ylabel("Implied Financing Level")
+    plt.legend()
+    plt.grid(True)
+    plt.show()
+    
+    # Predict probabilities
     results = []
-    for f in financing_range:
-        p = predict_trade_probability(room_name, ticker, f)
+    for f in forecasted_financing:
+        p = predict_trade_probability(model, trade_counts, training_pairs, dealer, ticker, f)
         results.append((f, p))
-    df_plot = pd.DataFrame(results, columns=['implied_financing', 'trade_probability'])
-
+    
+    result_df = pd.DataFrame(results, columns=['Forecasted_Financing', 'Predicted_Trade_Probability'])
+    
+    # Plot Trade Probability vs Financing
     plt.figure(figsize=(8, 4))
-    plt.plot(df_plot['implied_financing'], df_plot['trade_probability'], marker='o')
-    plt.title(f"Predicted P(Trade) for {room_name} - {ticker}")
-    plt.xlabel("Implied Financing")
+    plt.plot(result_df['Forecasted_Financing'], result_df['Predicted_Trade_Probability'], marker='o', color="purple")
+    plt.title(f"Predicted Trade Probability vs Financing for {dealer} - {ticker}")
+    plt.xlabel("Forecasted Financing")
     plt.ylabel("Probability of Trade")
     plt.grid(True)
     plt.show()
+    
+    return result_df
 
-# Example usage
-print("Example prediction:")
-print(predict_trade_probability("Magen", "AAPL", 44))
-
-plot_trade_probability("Magen", "AAPL", range(20, 60))
+# ===================================================
+# 4. EXAMPLE USAGE
+# ===================================================
+# data = pd.read_excel("your_data.xlsx")   # Ensure columns: ['date','room_name','ticker','implied_financing_traded','traded']
+# model, trade_counts, training_pairs = train_trade_probability_model(data)
+# result_df = forecast_and_predict(data, model, trade_counts, training_pairs, 'Magen', 'AAPL', steps=10)
+# print(result_df)
