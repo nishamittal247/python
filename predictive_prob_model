@@ -4,6 +4,7 @@ from sklearn.compose import ColumnTransformer
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.pipeline import Pipeline
 import numpy as np
+import pandas as pd
 
 def train_trade_probability_model(data):
     # Binary target
@@ -13,21 +14,16 @@ def train_trade_probability_model(data):
     data['broker_ticker_combo'] = data['room_name'].astype(str) + "_" + data['ticker'].astype(str)
 
     # Feature Engineering
-    if 'ask' in data.columns and 'bid' in data.columns:
-        data['spread'] = data['ask'] - data['bid']
-    else:
-        data['spread'] = 0  # fallback if not available
-    
-    data['log_amount'] = np.log1p(data['amount'])  # log(1+amount)
+    data['log_amount'] = np.log1p(data['amount'])  # log(1 + amount)
 
     # Features and target
-    features = ['broker_ticker_combo', 'implied_financing_traded', 'log_amount', 'spread']
+    features = ['broker_ticker_combo', 'implied_financing_traded', 'log_amount']
     x = data[features].copy()
     y = data['traded_flag']
 
     # Ensure correct types
     x['broker_ticker_combo'] = x['broker_ticker_combo'].astype(str)
-    for col in ['implied_financing_traded', 'log_amount', 'spread']:
+    for col in ['implied_financing_traded', 'log_amount']:
         x[col] = pd.to_numeric(x[col], errors='coerce')
 
     # Split data
@@ -35,7 +31,7 @@ def train_trade_probability_model(data):
 
     # Preprocessor
     categorical_features = ['broker_ticker_combo']
-    numerical_features = ['implied_financing_traded', 'log_amount', 'spread']
+    numerical_features = ['implied_financing_traded', 'log_amount']
 
     preprocessor = ColumnTransformer([
         ('num', StandardScaler(), numerical_features),
